@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+import ipaddress
+import json
 import os
 from pathlib import Path
 import re
@@ -11,7 +14,7 @@ import time
 from urllib.parse import quote
 from uuid import uuid4
 
-from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
@@ -22,8 +25,18 @@ BASE_DIR = Path(__file__).resolve().parent
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 JOB_TTL_SECONDS = 6 * 60 * 60
 JOB_WORKERS = 1
+RUNTIME_DIR = BASE_DIR / "runtime"
+JOBS_DIR = RUNTIME_DIR / "jobs"
+RECENT_CONVERSION_FILE = RUNTIME_DIR / "recent-conversion.json"
 
-app = FastAPI(title="TTF 字体转换工具")
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    _restore_incomplete_jobs()
+    yield
+
+
+app = FastAPI(title="TTF 字体转换工具", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 
 
@@ -37,12 +50,48 @@ class ConversionJob:
     output_path: Path
     created_at: float
     updated_at: float
+    target_path: Path | None = None
+    source_path: Path | None = None
+    client_region: str = ""
+    started_at: float | None = None
+    completed_at: float | None = None
+    duration_seconds: float | None = None
+    options: dict[str, object] = field(default_factory=dict)
     error: str = ""
 
 
 job_executor = ThreadPoolExecutor(max_workers=JOB_WORKERS)
 jobs_lock = Lock()
 jobs: dict[str, ConversionJob] = {}
+
+
+def _restore_incomplete_jobs() -> None:
+    _ensure_runtime_dirs()
+    for job in _load_all_disk_jobs():
+        if job.status in {"queued", "running"}:
+            if not job.target_path or not job.target_path.exists():
+                job.status = "failed"
+                job.progress = 0
+                job.message = "服务器重启后上传文件已丢失，请重新转换"
+                job.error = job.message
+                job.updated_at = time.time()
+                _save_job(job)
+                continue
+            job.status = "queued"
+            job.progress = 5
+            job.message = "服务器恢复后重新排队转换"
+            job.updated_at = time.time()
+            with jobs_lock:
+                jobs[job.job_id] = job
+            _save_job(job)
+            job_executor.submit(
+                _run_conversion_job,
+                job.job_id,
+                job.target_path,
+                job.source_path,
+                job.output_path,
+                job.options,
+            )
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -159,6 +208,7 @@ async def convert_font(
 
 @app.post("/api/convert-jobs")
 async def create_conversion_job(
+    request: Request,
     font_file: UploadFile = File(...),
     source_font_file: UploadFile | None = File(None),
     scale_percent: int = Form(100),
@@ -224,6 +274,18 @@ async def create_conversion_job(
         output_path = _temporary_ttf_path()
         job_id = uuid4().hex
         now = time.time()
+        options = {
+            "scale_percent": scale_percent,
+            "weight_mode": weight_mode,
+            "effect_units": effect_units,
+            "effect_x_units": effect_x,
+            "effect_y_units": effect_y,
+            "spacing_left_percent": spacing_left_percent,
+            "spacing_right_percent": spacing_right_percent,
+            "spacing_top_percent": spacing_top_percent,
+            "spacing_bottom_percent": spacing_bottom_percent,
+            "replacement_chars": replacement_chars,
+        }
         job = ConversionJob(
             job_id=job_id,
             status="queued",
@@ -233,9 +295,14 @@ async def create_conversion_job(
             output_path=output_path,
             created_at=now,
             updated_at=now,
+            target_path=target_path,
+            source_path=source_path,
+            client_region=_client_region(request),
+            options=options,
         )
         with jobs_lock:
             jobs[job_id] = job
+        _save_job(job)
 
         try:
             job_executor.submit(
@@ -244,22 +311,12 @@ async def create_conversion_job(
                 target_path,
                 source_path,
                 output_path,
-                {
-                    "scale_percent": scale_percent,
-                    "weight_mode": weight_mode,
-                    "effect_units": effect_units,
-                    "effect_x_units": effect_x,
-                    "effect_y_units": effect_y,
-                    "spacing_left_percent": spacing_left_percent,
-                    "spacing_right_percent": spacing_right_percent,
-                    "spacing_top_percent": spacing_top_percent,
-                    "spacing_bottom_percent": spacing_bottom_percent,
-                    "replacement_chars": replacement_chars,
-                },
+                options,
             )
         except Exception:
             with jobs_lock:
                 jobs.pop(job_id, None)
+            _remove_job_file(job_id)
             raise
         return JSONResponse(status_code=202, content=_job_payload(job))
     except FontConversionError as exc:
@@ -336,7 +393,14 @@ def _run_conversion_job(
     output_path: Path,
     options: dict[str, object],
 ) -> None:
-    _update_job(job_id, status="running", progress=10, message="正在转换字体，请保持页面打开")
+    started_at = time.time()
+    _update_job(
+        job_id,
+        status="running",
+        progress=10,
+        message="正在转换字体，请保持页面打开",
+        started_at=started_at,
+    )
     try:
         font_bytes = target_path.read_bytes()
         source_font_bytes = source_path.read_bytes() if source_path else None
@@ -356,7 +420,19 @@ def _run_conversion_job(
                 source_font_bytes=source_font_bytes,
                 replacement_chars=str(options["replacement_chars"]),
             )
-        _update_job(job_id, status="complete", progress=100, message="转换完成")
+        completed_at = time.time()
+        duration_seconds = completed_at - started_at
+        _update_job(
+            job_id,
+            status="complete",
+            progress=100,
+            message="转换完成",
+            completed_at=completed_at,
+            duration_seconds=duration_seconds,
+        )
+        job = _get_job_from_memory_or_disk(job_id)
+        if job:
+            _record_recent_conversion(job)
     except FontConversionError as exc:
         _remove_file(output_path)
         _update_job(job_id, status="failed", progress=0, message="转换失败", error=str(exc))
@@ -382,39 +458,89 @@ def _update_job(
     progress: int,
     message: str,
     error: str = "",
+    started_at: float | None = None,
+    completed_at: float | None = None,
+    duration_seconds: float | None = None,
 ) -> None:
     with jobs_lock:
         job = jobs.get(job_id)
         if not job:
-            return
+            job = _load_job_from_disk(job_id)
+            if not job:
+                return
+            jobs[job_id] = job
         job.status = status
         job.progress = progress
         job.message = message
         job.error = error
+        if started_at is not None:
+            job.started_at = started_at
+        if completed_at is not None:
+            job.completed_at = completed_at
+        if duration_seconds is not None:
+            job.duration_seconds = duration_seconds
         job.updated_at = time.time()
+        _save_job_unlocked(job)
 
 
 def _get_job_or_404(job_id: str) -> ConversionJob:
-    with jobs_lock:
-        job = jobs.get(job_id)
+    job = _get_job_from_memory_or_disk(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="转换任务不存在或已过期")
     return job
 
 
+def _get_job_from_memory_or_disk(job_id: str) -> ConversionJob | None:
+    with jobs_lock:
+        job = jobs.get(job_id)
+        if job:
+            return job
+        job = _load_job_from_disk(job_id)
+        if job:
+            jobs[job_id] = job
+        return job
+
+
 def _job_payload(job: ConversionJob) -> dict[str, object]:
+    queue_position = _job_queue_position(job)
+    recent_conversion = _recent_conversion_payload()
+    if recent_conversion is None and job.status == "complete" and job.duration_seconds is not None:
+        recent_conversion = _recent_conversion_from_job(job)
     payload: dict[str, object] = {
         "job_id": job.job_id,
         "status": job.status,
         "progress": job.progress,
         "message": job.message,
         "download_name": job.download_name,
+        "queue_position": queue_position,
+        "queued_ahead": max(0, queue_position - 1) if queue_position else 0,
+        "recent_conversion": recent_conversion,
     }
     if job.error:
         payload["error"] = job.error
+    if job.duration_seconds is not None:
+        payload["duration_seconds"] = round(job.duration_seconds, 1)
     if job.status == "complete":
         payload["download_url"] = f"/api/convert-jobs/{job.job_id}/download"
     return payload
+
+
+def _job_queue_position(job: ConversionJob) -> int:
+    if job.status not in {"queued", "running"}:
+        return 0
+
+    with jobs_lock:
+        active_jobs = [
+            active
+            for active in jobs.values()
+            if active.status in {"queued", "running"}
+        ]
+
+    active_jobs.sort(key=lambda active: (active.created_at, active.job_id))
+    for index, active in enumerate(active_jobs, start=1):
+        if active.job_id == job.job_id:
+            return index
+    return 0
 
 
 def _cleanup_old_jobs() -> None:
@@ -428,13 +554,196 @@ def _cleanup_old_jobs() -> None:
                 continue
             expired_paths.append(job.output_path)
             del jobs[job_id]
+            _remove_job_file(job_id)
 
     for path in expired_paths:
         _remove_file(path)
 
+    for job in _load_all_disk_jobs():
+        if job.status in {"queued", "running"}:
+            continue
+        if now - job.updated_at <= JOB_TTL_SECONDS:
+            continue
+        _remove_file(job.output_path)
+        _remove_job_file(job.job_id)
+
+
+def _ensure_runtime_dirs() -> None:
+    JOBS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _job_file(job_id: str) -> Path:
+    _ensure_runtime_dirs()
+    return JOBS_DIR / f"{job_id}.json"
+
+
+def _save_job(job: ConversionJob) -> None:
+    with jobs_lock:
+        _save_job_unlocked(job)
+
+
+def _save_job_unlocked(job: ConversionJob) -> None:
+    data = _job_to_json(job)
+    job_file = _job_file(job.job_id)
+    temp_file = job_file.with_suffix(".json.tmp")
+    temp_file.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    os.replace(temp_file, job_file)
+
+
+def _load_job_from_disk(job_id: str) -> ConversionJob | None:
+    path = JOBS_DIR / f"{job_id}.json"
+    if not path.exists():
+        return None
+    try:
+        return _job_from_json(json.loads(path.read_text(encoding="utf-8")))
+    except (OSError, ValueError, TypeError):
+        return None
+
+
+def _load_all_disk_jobs() -> list[ConversionJob]:
+    if not JOBS_DIR.exists():
+        return []
+    jobs_from_disk = []
+    for path in JOBS_DIR.glob("*.json"):
+        try:
+            job = _job_from_json(json.loads(path.read_text(encoding="utf-8")))
+        except (OSError, ValueError, TypeError):
+            continue
+        jobs_from_disk.append(job)
+    return jobs_from_disk
+
+
+def _remove_job_file(job_id: str) -> None:
+    _remove_file(JOBS_DIR / f"{job_id}.json")
+
+
+def _job_to_json(job: ConversionJob) -> dict[str, object]:
+    return {
+        "job_id": job.job_id,
+        "status": job.status,
+        "progress": job.progress,
+        "message": job.message,
+        "download_name": job.download_name,
+        "output_path": str(job.output_path),
+        "created_at": job.created_at,
+        "updated_at": job.updated_at,
+        "target_path": str(job.target_path) if job.target_path else "",
+        "source_path": str(job.source_path) if job.source_path else "",
+        "client_region": job.client_region,
+        "started_at": job.started_at,
+        "completed_at": job.completed_at,
+        "duration_seconds": job.duration_seconds,
+        "options": job.options,
+        "error": job.error,
+    }
+
+
+def _job_from_json(data: dict[str, object]) -> ConversionJob:
+    target_path = str(data.get("target_path") or "")
+    source_path = str(data.get("source_path") or "")
+    return ConversionJob(
+        job_id=str(data["job_id"]),
+        status=str(data["status"]),
+        progress=int(data["progress"]),
+        message=str(data["message"]),
+        download_name=str(data["download_name"]),
+        output_path=Path(str(data["output_path"])),
+        created_at=float(data["created_at"]),
+        updated_at=float(data["updated_at"]),
+        target_path=Path(target_path) if target_path else None,
+        source_path=Path(source_path) if source_path else None,
+        client_region=str(data.get("client_region") or ""),
+        started_at=_optional_float(data.get("started_at")),
+        completed_at=_optional_float(data.get("completed_at")),
+        duration_seconds=_optional_float(data.get("duration_seconds")),
+        options=dict(data.get("options") or {}),
+        error=str(data.get("error") or ""),
+    )
+
+
+def _optional_float(value: object) -> float | None:
+    if value is None:
+        return None
+    return float(value)
+
+
+def _record_recent_conversion(job: ConversionJob) -> None:
+    if job.duration_seconds is None:
+        return
+    _ensure_runtime_dirs()
+    payload = _recent_conversion_from_job(job)
+    temp_file = RECENT_CONVERSION_FILE.with_suffix(".json.tmp")
+    temp_file.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    os.replace(temp_file, RECENT_CONVERSION_FILE)
+
+
+def _recent_conversion_from_job(job: ConversionJob) -> dict[str, object]:
+    return {
+        "region": job.client_region or "未知地区",
+        "duration_seconds": round(job.duration_seconds or 0, 1),
+        "completed_at": job.completed_at or time.time(),
+        "download_name": job.download_name,
+    }
+
+
+def _recent_conversion_payload() -> dict[str, object] | None:
+    if not RECENT_CONVERSION_FILE.exists():
+        return None
+    try:
+        return json.loads(RECENT_CONVERSION_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def _client_region(request: Request) -> str:
+    headers = request.headers
+    city = (
+        headers.get("cf-ipcity")
+        or headers.get("x-client-city")
+        or headers.get("x-geo-city")
+    )
+    country = (
+        headers.get("cf-ipcountry")
+        or headers.get("x-client-country")
+        or headers.get("x-geo-country")
+    )
+    region = (
+        headers.get("cf-region")
+        or headers.get("x-client-region")
+        or headers.get("x-geo-region")
+    )
+    location = " ".join(part for part in (country, region, city) if part)
+    if location:
+        return location
+
+    forwarded_for = headers.get("x-forwarded-for", "")
+    client_ip = forwarded_for.split(",", 1)[0].strip()
+    if not client_ip:
+        client_ip = headers.get("x-real-ip", "").strip()
+    if not client_ip and request.client:
+        client_ip = request.client.host
+    return _client_ip_label(client_ip)
+
+
+def _client_ip_label(value: str) -> str:
+    if not value:
+        return "未知地区"
+    try:
+        address = ipaddress.ip_address(value)
+    except ValueError:
+        return "未知地区"
+    if address.is_private or address.is_loopback or address.is_link_local:
+        return "本地/内网"
+    if address.version == 4:
+        first, second, *_ = value.split(".")
+        return f"IP {first}.{second}.*.*"
+    groups = address.exploded.split(":")
+    return f"IP {groups[0]}:{groups[1]}:****"
+
 
 def _temporary_ttf_path() -> Path:
-    handle = tempfile.NamedTemporaryFile(delete=False, suffix=".ttf")
+    _ensure_runtime_dirs()
+    handle = tempfile.NamedTemporaryFile(delete=False, suffix=".ttf", dir=RUNTIME_DIR)
     try:
         return Path(handle.name)
     finally:

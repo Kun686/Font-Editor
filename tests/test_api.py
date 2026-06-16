@@ -1,13 +1,27 @@
 from io import BytesIO
+from pathlib import Path
+import shutil
 from time import sleep
 
 from fastapi.testclient import TestClient
 from fontTools.ttLib import TTFont
+import pytest
 
-from main import app
+from main import ConversionJob, RUNTIME_DIR, _job_payload, app, jobs, jobs_lock
 
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def clean_job_runtime():
+    with jobs_lock:
+        jobs.clear()
+    shutil.rmtree(RUNTIME_DIR, ignore_errors=True)
+    yield
+    with jobs_lock:
+        jobs.clear()
+    shutil.rmtree(RUNTIME_DIR, ignore_errors=True)
 
 
 def test_convert_endpoint_returns_ttf_download(sample_ttf_bytes):
@@ -29,6 +43,17 @@ def test_convert_endpoint_returns_ttf_download(sample_ttf_bytes):
     assert font["hmtx"].metrics["A"][0] > 625
 
 
+def _wait_for_job(job_id: str) -> dict[str, object]:
+    for _ in range(50):
+        status_response = client.get(f"/api/convert-jobs/{job_id}")
+        assert status_response.status_code == 200
+        status_payload = status_response.json()
+        if status_payload["status"] == "complete":
+            return status_payload
+        sleep(0.05)
+    raise AssertionError("conversion job did not complete")
+
+
 def test_async_conversion_job_completes_and_downloads_ttf(sample_ttf_bytes):
     response = client.post(
         "/api/convert-jobs",
@@ -46,16 +71,7 @@ def test_async_conversion_job_completes_and_downloads_ttf(sample_ttf_bytes):
     assert payload["status"] in {"queued", "running", "complete"}
     assert payload["download_name"] == "demo-125pct-bold-u5.ttf"
 
-    for _ in range(50):
-        status_response = client.get(f"/api/convert-jobs/{payload['job_id']}")
-        assert status_response.status_code == 200
-        status_payload = status_response.json()
-        if status_payload["status"] == "complete":
-            break
-        sleep(0.05)
-    else:
-        raise AssertionError("conversion job did not complete")
-
+    status_payload = _wait_for_job(payload["job_id"])
     assert status_payload["progress"] == 100
     assert status_payload["download_url"].endswith(f"/{payload['job_id']}/download")
 
@@ -65,6 +81,79 @@ def test_async_conversion_job_completes_and_downloads_ttf(sample_ttf_bytes):
     assert "demo-125pct-bold-u5.ttf" in download_response.headers["content-disposition"]
     font = TTFont(BytesIO(download_response.content))
     assert font["hmtx"].metrics["A"][0] > 625
+
+
+def test_async_conversion_status_survives_memory_cache_loss(sample_ttf_bytes):
+    response = client.post(
+        "/api/convert-jobs",
+        data={
+            "scale_percent": "100",
+            "weight_mode": "bold",
+            "effect_units": "5",
+        },
+        files={"font_file": ("demo.ttf", sample_ttf_bytes, "font/ttf")},
+    )
+    job_id = response.json()["job_id"]
+    status_payload = _wait_for_job(job_id)
+
+    with jobs_lock:
+        jobs.clear()
+
+    recovered_response = client.get(f"/api/convert-jobs/{job_id}")
+
+    assert recovered_response.status_code == 200
+    assert recovered_response.json()["status"] == status_payload["status"]
+    assert recovered_response.json()["download_url"].endswith(f"/{job_id}/download")
+
+
+def test_job_payload_reports_queue_position():
+    now = 1000.0
+    running = ConversionJob(
+        job_id="running",
+        status="running",
+        progress=10,
+        message="running",
+        download_name="running.ttf",
+        output_path=Path("running.ttf"),
+        created_at=now,
+        updated_at=now,
+    )
+    queued = ConversionJob(
+        job_id="queued",
+        status="queued",
+        progress=5,
+        message="queued",
+        download_name="queued.ttf",
+        output_path=Path("queued.ttf"),
+        created_at=now + 1,
+        updated_at=now + 1,
+    )
+    with jobs_lock:
+        jobs[running.job_id] = running
+        jobs[queued.job_id] = queued
+
+    payload = _job_payload(queued)
+
+    assert payload["queue_position"] == 2
+    assert payload["queued_ahead"] == 1
+
+
+def test_recent_conversion_reports_source_and_duration(sample_ttf_bytes):
+    response = client.post(
+        "/api/convert-jobs",
+        data={
+            "scale_percent": "100",
+            "weight_mode": "bold",
+            "effect_units": "5",
+        },
+        files={"font_file": ("demo.ttf", sample_ttf_bytes, "font/ttf")},
+        headers={"x-forwarded-for": "8.8.4.4"},
+    )
+
+    status_payload = _wait_for_job(response.json()["job_id"])
+
+    assert status_payload["recent_conversion"]["region"] == "IP 8.8.*.*"
+    assert status_payload["recent_conversion"]["duration_seconds"] >= 0
 
 
 def test_convert_endpoint_replaces_characters_from_source_font(build_ttf_bytes):
@@ -139,6 +228,8 @@ def test_homepage_includes_spacing_controls_and_progress_bar():
     assert "转换接口改为先写入服务器临时 TTF 文件" in response.text
     assert "2026-06-16 19:09 +08:00" in response.text
     assert "转换流程改为后台任务模式" in response.text
+    assert "2026-06-16 20:01 +08:00" in response.text
+    assert "新增排队序号显示" in response.text
     assert "选择要处理的字体 .ttf" in response.text
     assert "选择 B 目标字体" not in response.text
     assert "<span>水平效果" not in response.text
@@ -155,6 +246,8 @@ def test_homepage_includes_spacing_controls_and_progress_bar():
     assert 'id="spacing-top"' in response.text
     assert 'id="spacing-bottom"' in response.text
     assert 'id="progress-bar"' in response.text
+    assert 'id="queue-info"' in response.text
+    assert 'id="recent-conversion"' in response.text
     assert 'id="source-font-file"' in response.text
     assert 'id="replacement-scope"' in response.text
     assert 'id="custom-replacement-chars"' in response.text

@@ -433,6 +433,21 @@ h1 {
   background: var(--accent);
 }
 
+.job-meta {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.job-meta span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .actions {
   display: grid;
   grid-template-columns: 150px minmax(180px, auto) 1fr;
@@ -614,6 +629,10 @@ button:disabled {
   .spacing-grid,
   .replacement-grid,
   .actions {
+    grid-template-columns: 1fr;
+  }
+
+  .job-meta {
     grid-template-columns: 1fr;
   }
 

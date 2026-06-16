@@ -21,6 +21,8 @@ const errorMessage = document.querySelector("#error-message");
 const progressBar = document.querySelector("#progress-bar");
 const progressLabel = document.querySelector("#progress-label");
 const progressPercent = document.querySelector("#progress-percent");
+const queueInfo = document.querySelector("#queue-info");
+const recentConversion = document.querySelector("#recent-conversion");
 const previewText = document.querySelector("#preview-text");
 const changelogButton = document.querySelector("#changelog-button");
 const changelogDialog = document.querySelector("#changelog-dialog");
@@ -45,7 +47,7 @@ const previewFileUrls = {
   target: null,
   source: null,
 };
-const CHANGELOG_STORAGE_KEY = "ttf-tool-changelog-2026-06-16-1909";
+const CHANGELOG_STORAGE_KEY = "ttf-tool-changelog-2026-06-16-2001";
 let activeDownloadUrl = null;
 let progressTimer = null;
 
@@ -291,6 +293,8 @@ function setJobProgress(job) {
   if (!job) {
     return;
   }
+  updateQueueInfo(job);
+  updateRecentConversion(job.recent_conversion);
   if (job.status === "complete") {
     setProgress(100, job.message || "转换完成");
     statusText.textContent = job.message || "转换完成";
@@ -315,6 +319,56 @@ function delay(milliseconds) {
   return new Promise((resolve) => {
     window.setTimeout(resolve, milliseconds);
   });
+}
+
+function updateQueueInfo(job) {
+  if (!queueInfo) {
+    return;
+  }
+  const position = Number(job.queue_position || 0);
+  if (job.status === "queued" && position > 0) {
+    queueInfo.textContent = `当前排队第 ${position} 个，前面 ${Math.max(0, position - 1)} 个`;
+    return;
+  }
+  if (job.status === "running" && position > 0) {
+    queueInfo.textContent = `当前第 ${position} 个，正在转换`;
+    return;
+  }
+  if (job.status === "complete") {
+    queueInfo.textContent = "当前任务已完成";
+    return;
+  }
+  if (job.status === "failed") {
+    queueInfo.textContent = "当前任务失败";
+    return;
+  }
+  queueInfo.textContent = "暂无排队任务";
+}
+
+function updateRecentConversion(recent) {
+  if (!recentConversion) {
+    return;
+  }
+  if (!recent) {
+    recentConversion.textContent = "暂无最近转换记录";
+    return;
+  }
+  const region = recent.region || "未知地区";
+  const duration = formatDuration(recent.duration_seconds);
+  recentConversion.textContent = `最近 ${region} 用户转换完成，用时 ${duration}`;
+}
+
+function formatDuration(seconds) {
+  const value = Number(seconds);
+  if (!Number.isFinite(value) || value < 0) {
+    return "未知";
+  }
+  if (value < 60) {
+    return `${value.toFixed(1)} 秒`;
+  }
+  const minutes = Math.floor(value / 60);
+  const restSeconds = Math.round(value % 60);
+  return `${minutes} 分 ${restSeconds} 秒`;
 }
 
 function buildConversionFormData() {
@@ -444,6 +498,9 @@ function clearDownload() {
   downloadLink.removeAttribute("href");
   downloadLink.removeAttribute("download");
   downloadLink.textContent = "下载转换后的字体";
+  if (queueInfo) {
+    queueInfo.textContent = "暂无排队任务";
+  }
   setProgress(0, "等待开始");
 }
 

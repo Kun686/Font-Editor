@@ -16,10 +16,17 @@ def test_frontend_explicitly_appends_optional_source_font_file():
 
 def test_frontend_uses_background_conversion_jobs():
     script = (BASE_DIR / "static" / "app.js").read_text(encoding="utf-8")
+    markup = (BASE_DIR / "templates" / "index.html").read_text(encoding="utf-8")
 
     assert 'xhr.open("POST", "/api/convert-jobs")' in script
     assert "function pollConversionJob" in script
     assert "download_url" in script
+    assert 'id="queue-info"' in markup
+    assert 'id="recent-conversion"' in markup
+    assert "function updateQueueInfo" in script
+    assert "function updateRecentConversion" in script
+    assert "queue_position" in script
+    assert "recent_conversion" in script
 
 
 def test_frontend_previews_uploaded_fonts_before_conversion():
@@ -60,7 +67,7 @@ def test_frontend_uses_single_weight_strength_input():
 def test_frontend_changelog_key_updates_for_latest_entry():
     script = (BASE_DIR / "static" / "app.js").read_text(encoding="utf-8")
 
-    assert "ttf-tool-changelog-2026-06-16-1909" in script
+    assert "ttf-tool-changelog-2026-06-16-2001" in script
 
 
 def test_frontend_uses_indeterminate_progress_during_conversion():

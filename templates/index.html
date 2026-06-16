@@ -206,6 +206,10 @@
               <output id="progress-percent" for="progress-bar">0%</output>
             </div>
             <progress id="progress-bar" class="progress-bar" max="100" value="0"></progress>
+            <div class="job-meta" aria-label="任务状态">
+              <span id="queue-info">暂无排队任务</span>
+              <span id="recent-conversion">暂无最近转换记录</span>
+            </div>
           </div>
 
           <div class="actions">
@@ -228,6 +232,13 @@
           <div class="dialog-header">
             <h2 id="changelog-title">更新日志</h2>
             <button class="dialog-close" type="submit" aria-label="关闭">×</button>
+          </div>
+          <div class="changelog-entry">
+            <p class="changelog-time">2026-06-16 20:01 +08:00</p>
+            <ul class="changelog-list">
+              <li>后台转换任务改为磁盘持久化，减少服务重启或任务恢复时出现“任务不存在或已过期”的情况。</li>
+              <li>新增排队序号显示，并显示最近完成转换用户的来源地区和转换耗时。</li>
+            </ul>
           </div>
           <div class="changelog-entry">
             <p class="changelog-time">2026-06-16 19:09 +08:00</p>
