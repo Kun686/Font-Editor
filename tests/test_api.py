@@ -94,6 +94,8 @@ def test_homepage_includes_spacing_controls_and_progress_bar():
     assert "修复进度条停在 95%" in response.text
     assert "2026-06-16 16:36 +08:00" in response.text
     assert "字重强度改为单一字体单位输入" in response.text
+    assert "2026-06-16 17:10 +08:00" in response.text
+    assert "加粗算法改为保留原轮廓并追加平移轮廓副本" in response.text
     assert "选择要处理的字体 .ttf" in response.text
     assert "选择 B 目标字体" not in response.text
     assert "<span>水平效果" not in response.text

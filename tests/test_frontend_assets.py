@@ -49,6 +49,12 @@ def test_frontend_uses_single_weight_strength_input():
     assert "<span>垂直效果" not in markup
 
 
+def test_frontend_changelog_key_updates_for_latest_entry():
+    script = (BASE_DIR / "static" / "app.js").read_text(encoding="utf-8")
+
+    assert "ttf-tool-changelog-2026-06-16-1710" in script
+
+
 def test_frontend_uses_indeterminate_progress_during_conversion():
     script = (BASE_DIR / "static" / "app.js").read_text(encoding="utf-8")
 

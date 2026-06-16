@@ -467,26 +467,75 @@ def _apply_weight_effect(font: TTFont, mode: str, effect_x: int, effect_y: int) 
     if effect_x == 0 and effect_y == 0:
         return
 
-    direction = 1 if mode == "bold" else -1
-    delta_x = effect_x * direction
-    delta_y = effect_y * direction
-
     glyf = font["glyf"]
+    bold_strength = max(effect_x, effect_y)
+    thin_delta_x = -effect_x
+    thin_delta_y = -effect_y
     for glyph_name in font.getGlyphOrder():
         glyph = glyf[glyph_name]
         glyph.expand(glyf)
-        if glyph.isComposite():
-            glyph.tryRecalcBoundsComposite(glyf)
-            continue
-        if glyph.numberOfContours <= 0:
+        if not _glyph_has_drawable_outline(glyph):
             continue
 
-        _offset_glyph_contours(glyph, delta_x, delta_y)
-        glyph.coordinates.toInt()
-        glyph.recalcBounds(glyf)
+        if mode == "bold":
+            _append_bold_overlay(glyph, glyf, bold_strength)
+        else:
+            if glyph.isComposite():
+                glyph.tryRecalcBoundsComposite(glyf)
+                continue
+            _offset_glyph_contours(glyph, thin_delta_x, thin_delta_y)
+            glyph.coordinates.toInt()
+            glyph.recalcBounds(glyf)
 
-    _adjust_horizontal_metrics(font, delta_x)
+    if mode == "bold":
+        _adjust_synthetic_bold_metrics(font, bold_strength)
+    else:
+        _adjust_horizontal_metrics(font, thin_delta_x)
+    _refresh_glyph_counts(font)
     _mark_weight_style(font, mode)
+
+
+def _glyph_has_drawable_outline(glyph) -> bool:
+    return glyph.isComposite() or glyph.numberOfContours > 0
+
+
+def _append_bold_overlay(glyph, glyf, strength: int) -> None:
+    if strength <= 0:
+        return
+
+    if glyph.isComposite():
+        for component in list(glyph.components):
+            shifted = deepcopy(component)
+            shifted.x = _clamp_signed_16(shifted.x + strength)
+            glyph.components.append(shifted)
+        glyph.tryRecalcBoundsComposite(glyf)
+        return
+
+    original_coordinates = list(glyph.coordinates)
+    original_flags = list(glyph.flags)
+    original_end_points = list(glyph.endPtsOfContours)
+    base_index = len(glyph.coordinates)
+
+    glyph.coordinates.extend(
+        [
+            (_clamp_signed_16(x + strength), _clamp_signed_16(y))
+            for x, y in original_coordinates
+        ]
+    )
+    glyph.flags.extend(original_flags)
+    glyph.endPtsOfContours.extend(base_index + end_point for end_point in original_end_points)
+    glyph.numberOfContours = len(glyph.endPtsOfContours)
+    glyph.coordinates.toInt()
+    glyph.recalcBounds(glyf)
+
+
+def _refresh_glyph_counts(font: TTFont) -> None:
+    glyph_order_length = len(font.getGlyphOrder())
+    if "maxp" in font:
+        font["maxp"].numGlyphs = glyph_order_length
+        font["maxp"].recalc(font)
+    if "hhea" in font:
+        font["hhea"].numberOfHMetrics = glyph_order_length
 
 
 def _apply_layout_spacing(font: TTFont, left: int, right: int, top: int, bottom: int) -> None:
@@ -650,6 +699,20 @@ def _adjust_horizontal_metrics(font: TTFont, delta_x: int) -> None:
         name: (
             _clamp_unsigned_16(advance + advance_delta),
             _clamp_signed_16(lsb - delta_x),
+        )
+        for name, (advance, lsb) in hmtx.metrics.items()
+    }
+
+
+def _adjust_synthetic_bold_metrics(font: TTFont, strength: int) -> None:
+    if strength == 0:
+        return
+
+    hmtx = font["hmtx"]
+    hmtx.metrics = {
+        name: (
+            _clamp_unsigned_16(advance + strength),
+            _clamp_signed_16(lsb),
         )
         for name, (advance, lsb) in hmtx.metrics.items()
     }

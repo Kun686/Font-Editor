@@ -230,6 +230,13 @@
             <button class="dialog-close" type="submit" aria-label="关闭">×</button>
           </div>
           <div class="changelog-entry">
+            <p class="changelog-time">2026-06-16 17:10 +08:00</p>
+            <ul class="changelog-list">
+              <li>加粗算法改为保留原轮廓并追加平移轮廓副本，避免复杂字形被拉坏或变成块状。</li>
+              <li>Bold 只增加一份右移轮廓副本，降低大字体转换时的耗时和文件膨胀。</li>
+            </ul>
+          </div>
+          <div class="changelog-entry">
             <p class="changelog-time">2026-06-16 16:36 +08:00</p>
             <ul class="changelog-list">
               <li>字重强度改为单一字体单位输入，Bold 和 Thin 不再拆分水平效果、垂直效果。</li>
