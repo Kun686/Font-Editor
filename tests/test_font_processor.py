@@ -152,11 +152,13 @@ def test_bold_effect_expands_horizontal_and_vertical_bounds(sample_ttf_bytes):
     font = _load_font(converted)
 
     assert "A" in font.getGlyphOrder()
-    assert _glyph_bounds(font) == (50, 0, 455, 500)
-    assert font["hmtx"].metrics["A"][0] == 505
+    assert _glyph_bounds(font) == (45, -5, 455, 505)
+    assert font["hmtx"].metrics["A"] == (510, 45)
+    assert font["hhea"].ascent == 805
+    assert font["hhea"].descent == -205
 
 
-def test_bold_effect_preserves_original_outline_and_adds_shifted_overlays(sample_ttf_bytes):
+def test_bold_effect_preserves_original_outline_and_adds_rounded_overlays(sample_ttf_bytes):
     source = _load_font(sample_ttf_bytes)
     original_glyph = source["glyf"]["A"]
     original_glyph.expand(source["glyf"])
@@ -171,16 +173,18 @@ def test_bold_effect_preserves_original_outline_and_adds_shifted_overlays(sample
     )
     font = _load_font(converted)
     glyph = font["glyf"]["A"]
-    shifted_coordinates = [
-        (x + 5, y)
-        for x, y in original_coordinates
-    ]
+    contour_bounds = _glyph_contour_bounds(font, "A")
 
     assert not glyph.isComposite()
-    assert glyph.numberOfContours == original_contours * 2
+    assert glyph.numberOfContours == original_contours * 9
     assert list(glyph.coordinates[: len(original_coordinates)]) == original_coordinates
-    assert list(glyph.coordinates[len(original_coordinates) :]) == shifted_coordinates
-    assert _glyph_bounds(font) == (50, 0, 455, 500)
+    assert (45, 0, 445, 500) in contour_bounds
+    assert (55, 0, 455, 500) in contour_bounds
+    assert (50, -5, 450, 495) in contour_bounds
+    assert (50, 5, 450, 505) in contour_bounds
+    assert (46, -4, 446, 496) in contour_bounds
+    assert (54, 4, 454, 504) in contour_bounds
+    assert _glyph_bounds(font) == (45, -5, 455, 505)
 
 
 def test_legacy_bold_effect_expands_horizontal_and_vertical_bounds(sample_ttf_bytes):
@@ -194,8 +198,8 @@ def test_legacy_bold_effect_expands_horizontal_and_vertical_bounds(sample_ttf_by
     font = _load_font(converted)
 
     assert "A" in font.getGlyphOrder()
-    assert _glyph_bounds(font) == (50, 0, 457, 500)
-    assert font["hmtx"].metrics["A"][0] == 507
+    assert _glyph_bounds(font) == (45, -7, 455, 507)
+    assert font["hmtx"].metrics["A"] == (510, 45)
 
 
 def test_bold_effect_offsets_holes_inward_instead_of_scaling_from_center():
@@ -215,7 +219,13 @@ def test_bold_effect_offsets_holes_inward_instead_of_scaling_from_center():
     assert (400, 200, 600, 800) in contour_bounds
     assert (5, 0, 1005, 1000) in contour_bounds
     assert (405, 200, 605, 800) in contour_bounds
-    assert _glyph_bounds(font, "O") == (0, 0, 1005, 1000)
+    assert (-5, 0, 995, 1000) in contour_bounds
+    assert (395, 200, 595, 800) in contour_bounds
+    assert (0, -5, 1000, 995) in contour_bounds
+    assert (400, 195, 600, 795) in contour_bounds
+    assert (-4, -4, 996, 996) in contour_bounds
+    assert (396, 196, 596, 796) in contour_bounds
+    assert _glyph_bounds(font, "O") == (-5, -5, 1005, 1005)
 
 
 def test_bold_effect_limits_point_movement_to_requested_units():

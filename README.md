@@ -116,12 +116,18 @@ client_max_body_size 50m;
 
 location / {
     proxy_pass http://127.0.0.1:8001;
+    proxy_connect_timeout 60s;
+    proxy_send_timeout 300s;
+    proxy_read_timeout 300s;
+    proxy_buffering off;
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto $scheme;
 }
 ```
+
+如果使用 20MB 以上字体并开启 Bold 100 这类高强度整体加粗，转换可能超过 1 分钟。宝塔反向代理里也需要把“连接超时/响应超时”调到 300 秒左右，否则 Nginx 可能先返回 504。
 
 7. 在宝塔站点 SSL 页面申请或导入证书，开启 HTTPS。
 

@@ -468,7 +468,7 @@ def _apply_weight_effect(font: TTFont, mode: str, effect_x: int, effect_y: int) 
         return
 
     glyf = font["glyf"]
-    bold_strength = max(effect_x, effect_y)
+    bold_offsets = _bold_overlay_offsets(effect_x, effect_y)
     thin_delta_x = -effect_x
     thin_delta_y = -effect_y
     for glyph_name in font.getGlyphOrder():
@@ -478,7 +478,7 @@ def _apply_weight_effect(font: TTFont, mode: str, effect_x: int, effect_y: int) 
             continue
 
         if mode == "bold":
-            _append_bold_overlay(glyph, glyf, bold_strength)
+            _append_bold_overlay(glyph, glyf, bold_offsets)
         else:
             if glyph.isComposite():
                 glyph.tryRecalcBoundsComposite(glyf)
@@ -488,7 +488,7 @@ def _apply_weight_effect(font: TTFont, mode: str, effect_x: int, effect_y: int) 
             glyph.recalcBounds(glyf)
 
     if mode == "bold":
-        _adjust_synthetic_bold_metrics(font, bold_strength)
+        _adjust_synthetic_bold_metrics(font, bold_offsets)
     else:
         _adjust_horizontal_metrics(font, thin_delta_x)
     _refresh_glyph_counts(font)
@@ -499,15 +499,40 @@ def _glyph_has_drawable_outline(glyph) -> bool:
     return glyph.isComposite() or glyph.numberOfContours > 0
 
 
-def _append_bold_overlay(glyph, glyf, strength: int) -> None:
-    if strength <= 0:
+def _bold_overlay_offsets(effect_x: int, effect_y: int) -> tuple[tuple[int, int], ...]:
+    offsets: list[tuple[int, int]] = []
+
+    if effect_x:
+        offsets.extend(((-effect_x, 0), (effect_x, 0)))
+    if effect_y:
+        offsets.extend(((0, -effect_y), (0, effect_y)))
+    if effect_x and effect_y:
+        diagonal_x = max(1, _round(effect_x * 0.707))
+        diagonal_y = max(1, _round(effect_y * 0.707))
+        offsets.extend(
+            (
+                (-diagonal_x, -diagonal_y),
+                (diagonal_x, -diagonal_y),
+                (-diagonal_x, diagonal_y),
+                (diagonal_x, diagonal_y),
+            )
+        )
+
+    return tuple(dict.fromkeys(offsets))
+
+
+def _append_bold_overlay(glyph, glyf, offsets: tuple[tuple[int, int], ...]) -> None:
+    if not offsets:
         return
 
     if glyph.isComposite():
-        for component in list(glyph.components):
-            shifted = deepcopy(component)
-            shifted.x = _clamp_signed_16(shifted.x + strength)
-            glyph.components.append(shifted)
+        original_components = list(glyph.components)
+        for offset_x, offset_y in offsets:
+            for component in original_components:
+                shifted = deepcopy(component)
+                shifted.x = _clamp_signed_16(shifted.x + offset_x)
+                shifted.y = _clamp_signed_16(shifted.y + offset_y)
+                glyph.components.append(shifted)
         glyph.tryRecalcBoundsComposite(glyf)
         return
 
@@ -516,14 +541,20 @@ def _append_bold_overlay(glyph, glyf, strength: int) -> None:
     original_end_points = list(glyph.endPtsOfContours)
     base_index = len(glyph.coordinates)
 
-    glyph.coordinates.extend(
-        [
-            (_clamp_signed_16(x + strength), _clamp_signed_16(y))
-            for x, y in original_coordinates
-        ]
-    )
-    glyph.flags.extend(original_flags)
-    glyph.endPtsOfContours.extend(base_index + end_point for end_point in original_end_points)
+    for offset_x, offset_y in offsets:
+        glyph.coordinates.extend(
+            [
+                (
+                    _clamp_signed_16(x + offset_x),
+                    _clamp_signed_16(y + offset_y),
+                )
+                for x, y in original_coordinates
+            ]
+        )
+        glyph.flags.extend(original_flags)
+        glyph.endPtsOfContours.extend(base_index + end_point for end_point in original_end_points)
+        base_index += len(original_coordinates)
+
     glyph.numberOfContours = len(glyph.endPtsOfContours)
     glyph.coordinates.toInt()
     glyph.recalcBounds(glyf)
@@ -704,15 +735,27 @@ def _adjust_horizontal_metrics(font: TTFont, delta_x: int) -> None:
     }
 
 
-def _adjust_synthetic_bold_metrics(font: TTFont, strength: int) -> None:
-    if strength == 0:
+def _adjust_synthetic_bold_metrics(font: TTFont, offsets: tuple[tuple[int, int], ...]) -> None:
+    if not offsets:
+        return
+
+    left = max((abs(offset_x) for offset_x, _ in offsets if offset_x < 0), default=0)
+    right = max((offset_x for offset_x, _ in offsets if offset_x > 0), default=0)
+    top = max((offset_y for _, offset_y in offsets if offset_y > 0), default=0)
+    bottom = max((abs(offset_y) for _, offset_y in offsets if offset_y < 0), default=0)
+
+    if top or bottom:
+        _adjust_layout_vertical_spacing(font, top, bottom)
+
+    if left == 0 and right == 0:
         return
 
     hmtx = font["hmtx"]
+    advance_delta = left + right
     hmtx.metrics = {
         name: (
-            _clamp_unsigned_16(advance + strength),
-            _clamp_signed_16(lsb),
+            _clamp_unsigned_16(advance + advance_delta),
+            _clamp_signed_16(lsb - left),
         )
         for name, (advance, lsb) in hmtx.metrics.items()
     }
