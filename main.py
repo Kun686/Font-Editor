@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 import os
 from pathlib import Path
 import re
 import tempfile
+from threading import Lock
+import time
 from urllib.parse import quote
+from uuid import uuid4
 
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from font_processor import FontConversionError, replacement_characters, write_processed_ttf
@@ -15,9 +20,29 @@ from font_processor import FontConversionError, replacement_characters, write_pr
 
 BASE_DIR = Path(__file__).resolve().parent
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+JOB_TTL_SECONDS = 6 * 60 * 60
+JOB_WORKERS = 1
 
 app = FastAPI(title="TTF 字体转换工具")
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
+
+
+@dataclass
+class ConversionJob:
+    job_id: str
+    status: str
+    progress: int
+    message: str
+    download_name: str
+    output_path: Path
+    created_at: float
+    updated_at: float
+    error: str = ""
+
+
+job_executor = ThreadPoolExecutor(max_workers=JOB_WORKERS)
+jobs_lock = Lock()
+jobs: dict[str, ConversionJob] = {}
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -132,6 +157,282 @@ async def convert_font(
     )
 
 
+@app.post("/api/convert-jobs")
+async def create_conversion_job(
+    font_file: UploadFile = File(...),
+    source_font_file: UploadFile | None = File(None),
+    scale_percent: int = Form(100),
+    weight_mode: str = Form("none"),
+    effect_units: float | None = Form(None),
+    effect_x_units: float | None = Form(None),
+    effect_y_units: float | None = Form(None),
+    effect_x_percent: float | None = Form(None),
+    effect_y_percent: float | None = Form(None),
+    spacing_left_percent: float = Form(0),
+    spacing_right_percent: float = Form(0),
+    spacing_top_percent: float = Form(0),
+    spacing_bottom_percent: float = Form(0),
+    replacement_scope: str = Form("digits"),
+    custom_replacement_chars: str = Form(""),
+) -> JSONResponse:
+    _cleanup_old_jobs()
+    filename = font_file.filename or ""
+    if not filename.lower().endswith(".ttf"):
+        raise HTTPException(status_code=400, detail="只支持 .ttf 字体文件")
+    replacement_enabled = bool(source_font_file and (source_font_file.filename or ""))
+    if replacement_enabled and not (source_font_file.filename or "").lower().endswith(".ttf"):
+        raise HTTPException(status_code=400, detail="来源字体只支持 .ttf 字体文件")
+
+    target_path: Path | None = None
+    source_path: Path | None = None
+    output_path: Path | None = None
+    try:
+        target_path, target_size = await _write_upload_to_temp(font_file, "字体文件不能超过 50MB")
+        if target_size == 0:
+            raise HTTPException(status_code=400, detail="字体文件为空")
+
+        if replacement_enabled and source_font_file:
+            source_path, source_size = await _write_upload_to_temp(source_font_file, "来源字体文件不能超过 50MB")
+            if source_size == 0:
+                raise HTTPException(status_code=400, detail="来源字体文件为空")
+
+        effect_x, effect_y = _resolve_effect_form_values(
+            effect_units,
+            effect_x_units,
+            effect_y_units,
+            effect_x_percent,
+            effect_y_percent,
+        )
+        replacement_chars = (
+            replacement_characters(replacement_scope, custom_replacement_chars)
+            if replacement_enabled
+            else ""
+        )
+        download_name = _download_name(
+            filename,
+            scale_percent=scale_percent,
+            weight_mode=weight_mode,
+            effect_x_units=effect_x,
+            effect_y_units=effect_y,
+            spacing_left_percent=spacing_left_percent,
+            spacing_right_percent=spacing_right_percent,
+            spacing_top_percent=spacing_top_percent,
+            spacing_bottom_percent=spacing_bottom_percent,
+            replacement_scope=replacement_scope if replacement_enabled else "",
+        )
+
+        output_path = _temporary_ttf_path()
+        job_id = uuid4().hex
+        now = time.time()
+        job = ConversionJob(
+            job_id=job_id,
+            status="queued",
+            progress=5,
+            message="已提交后台转换，等待处理",
+            download_name=download_name,
+            output_path=output_path,
+            created_at=now,
+            updated_at=now,
+        )
+        with jobs_lock:
+            jobs[job_id] = job
+
+        try:
+            job_executor.submit(
+                _run_conversion_job,
+                job_id,
+                target_path,
+                source_path,
+                output_path,
+                {
+                    "scale_percent": scale_percent,
+                    "weight_mode": weight_mode,
+                    "effect_units": effect_units,
+                    "effect_x_units": effect_x,
+                    "effect_y_units": effect_y,
+                    "spacing_left_percent": spacing_left_percent,
+                    "spacing_right_percent": spacing_right_percent,
+                    "spacing_top_percent": spacing_top_percent,
+                    "spacing_bottom_percent": spacing_bottom_percent,
+                    "replacement_chars": replacement_chars,
+                },
+            )
+        except Exception:
+            with jobs_lock:
+                jobs.pop(job_id, None)
+            raise
+        return JSONResponse(status_code=202, content=_job_payload(job))
+    except FontConversionError as exc:
+        _remove_optional_file(target_path)
+        _remove_optional_file(source_path)
+        _remove_optional_file(output_path)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except HTTPException:
+        _remove_optional_file(target_path)
+        _remove_optional_file(source_path)
+        _remove_optional_file(output_path)
+        raise
+    except Exception:
+        _remove_optional_file(target_path)
+        _remove_optional_file(source_path)
+        _remove_optional_file(output_path)
+        raise
+
+
+@app.get("/api/convert-jobs/{job_id}")
+def get_conversion_job(job_id: str) -> dict[str, object]:
+    _cleanup_old_jobs()
+    job = _get_job_or_404(job_id)
+    return _job_payload(job)
+
+
+@app.get("/api/convert-jobs/{job_id}/download")
+def download_conversion_job(job_id: str) -> FileResponse:
+    _cleanup_old_jobs()
+    job = _get_job_or_404(job_id)
+    if job.status != "complete":
+        raise HTTPException(status_code=409, detail="转换尚未完成")
+    if not job.output_path.exists():
+        raise HTTPException(status_code=410, detail="转换文件已过期，请重新转换")
+
+    return FileResponse(
+        path=job.output_path,
+        media_type="font/ttf",
+        headers={
+            "Content-Disposition": (
+                "attachment; filename=converted.ttf; "
+                f"filename*=UTF-8''{quote(job.download_name)}"
+            ),
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+async def _write_upload_to_temp(upload: UploadFile, too_large_message: str) -> tuple[Path, int]:
+    path = _temporary_ttf_path()
+    size = 0
+    try:
+        with path.open("wb") as output:
+            while True:
+                chunk = await upload.read(1024 * 1024)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > MAX_UPLOAD_BYTES:
+                    raise HTTPException(status_code=413, detail=too_large_message)
+                output.write(chunk)
+        return path, size
+    except Exception:
+        _remove_file(path)
+        raise
+    finally:
+        await upload.close()
+
+
+def _run_conversion_job(
+    job_id: str,
+    target_path: Path,
+    source_path: Path | None,
+    output_path: Path,
+    options: dict[str, object],
+) -> None:
+    _update_job(job_id, status="running", progress=10, message="正在转换字体，请保持页面打开")
+    try:
+        font_bytes = target_path.read_bytes()
+        source_font_bytes = source_path.read_bytes() if source_path else None
+        with output_path.open("wb") as output_file:
+            write_processed_ttf(
+                font_bytes,
+                output_file,
+                scale_percent=int(options["scale_percent"]),
+                weight_mode=str(options["weight_mode"]),
+                effect_units=options["effect_units"],
+                effect_x_units=options["effect_x_units"],
+                effect_y_units=options["effect_y_units"],
+                spacing_left_percent=float(options["spacing_left_percent"]),
+                spacing_right_percent=float(options["spacing_right_percent"]),
+                spacing_top_percent=float(options["spacing_top_percent"]),
+                spacing_bottom_percent=float(options["spacing_bottom_percent"]),
+                source_font_bytes=source_font_bytes,
+                replacement_chars=str(options["replacement_chars"]),
+            )
+        _update_job(job_id, status="complete", progress=100, message="转换完成")
+    except FontConversionError as exc:
+        _remove_file(output_path)
+        _update_job(job_id, status="failed", progress=0, message="转换失败", error=str(exc))
+    except Exception:
+        _remove_file(output_path)
+        _update_job(
+            job_id,
+            status="failed",
+            progress=0,
+            message="转换失败",
+            error="服务器转换失败，请查看后台日志",
+        )
+    finally:
+        _remove_file(target_path)
+        if source_path:
+            _remove_file(source_path)
+
+
+def _update_job(
+    job_id: str,
+    *,
+    status: str,
+    progress: int,
+    message: str,
+    error: str = "",
+) -> None:
+    with jobs_lock:
+        job = jobs.get(job_id)
+        if not job:
+            return
+        job.status = status
+        job.progress = progress
+        job.message = message
+        job.error = error
+        job.updated_at = time.time()
+
+
+def _get_job_or_404(job_id: str) -> ConversionJob:
+    with jobs_lock:
+        job = jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="转换任务不存在或已过期")
+    return job
+
+
+def _job_payload(job: ConversionJob) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "job_id": job.job_id,
+        "status": job.status,
+        "progress": job.progress,
+        "message": job.message,
+        "download_name": job.download_name,
+    }
+    if job.error:
+        payload["error"] = job.error
+    if job.status == "complete":
+        payload["download_url"] = f"/api/convert-jobs/{job.job_id}/download"
+    return payload
+
+
+def _cleanup_old_jobs() -> None:
+    now = time.time()
+    expired_paths: list[Path] = []
+    with jobs_lock:
+        for job_id, job in list(jobs.items()):
+            if job.status in {"queued", "running"}:
+                continue
+            if now - job.updated_at <= JOB_TTL_SECONDS:
+                continue
+            expired_paths.append(job.output_path)
+            del jobs[job_id]
+
+    for path in expired_paths:
+        _remove_file(path)
+
+
 def _temporary_ttf_path() -> Path:
     handle = tempfile.NamedTemporaryFile(delete=False, suffix=".ttf")
     try:
@@ -145,6 +446,11 @@ def _remove_file(path: Path) -> None:
         os.remove(path)
     except FileNotFoundError:
         pass
+
+
+def _remove_optional_file(path: Path | None) -> None:
+    if path is not None:
+        _remove_file(path)
 
 
 def _download_name(

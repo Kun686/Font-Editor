@@ -230,6 +230,13 @@
             <button class="dialog-close" type="submit" aria-label="关闭">×</button>
           </div>
           <div class="changelog-entry">
+            <p class="changelog-time">2026-06-16 19:09 +08:00</p>
+            <ul class="changelog-list">
+              <li>转换流程改为后台任务模式，上传后立即返回任务编号，前端轮询任务状态，避免长时间转换触发 Nginx 504。</li>
+              <li>同一进程内限制为单个字体转换任务依次处理，降低多个大字体同时加粗导致服务器内存打满的风险。</li>
+            </ul>
+          </div>
+          <div class="changelog-entry">
             <p class="changelog-time">2026-06-16 18:05 +08:00</p>
             <ul class="changelog-list">
               <li>转换接口改为先写入服务器临时 TTF 文件，再流式返回下载内容，降低大字体转换时的内存峰值。</li>

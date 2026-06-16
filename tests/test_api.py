@@ -1,4 +1,5 @@
 from io import BytesIO
+from time import sleep
 
 from fastapi.testclient import TestClient
 from fontTools.ttLib import TTFont
@@ -25,6 +26,44 @@ def test_convert_endpoint_returns_ttf_download(sample_ttf_bytes):
     assert "attachment" in response.headers["content-disposition"]
     assert "demo-125pct-bold-u5.ttf" in response.headers["content-disposition"]
     font = TTFont(BytesIO(response.content))
+    assert font["hmtx"].metrics["A"][0] > 625
+
+
+def test_async_conversion_job_completes_and_downloads_ttf(sample_ttf_bytes):
+    response = client.post(
+        "/api/convert-jobs",
+        data={
+            "scale_percent": "125",
+            "weight_mode": "bold",
+            "effect_units": "5",
+        },
+        files={"font_file": ("demo.ttf", sample_ttf_bytes, "font/ttf")},
+    )
+
+    assert response.status_code == 202
+    payload = response.json()
+    assert payload["job_id"]
+    assert payload["status"] in {"queued", "running", "complete"}
+    assert payload["download_name"] == "demo-125pct-bold-u5.ttf"
+
+    for _ in range(50):
+        status_response = client.get(f"/api/convert-jobs/{payload['job_id']}")
+        assert status_response.status_code == 200
+        status_payload = status_response.json()
+        if status_payload["status"] == "complete":
+            break
+        sleep(0.05)
+    else:
+        raise AssertionError("conversion job did not complete")
+
+    assert status_payload["progress"] == 100
+    assert status_payload["download_url"].endswith(f"/{payload['job_id']}/download")
+
+    download_response = client.get(status_payload["download_url"])
+    assert download_response.status_code == 200
+    assert download_response.headers["content-type"] == "font/ttf"
+    assert "demo-125pct-bold-u5.ttf" in download_response.headers["content-disposition"]
+    font = TTFont(BytesIO(download_response.content))
     assert font["hmtx"].metrics["A"][0] > 625
 
 
@@ -98,6 +137,8 @@ def test_homepage_includes_spacing_controls_and_progress_bar():
     assert "加粗算法改为保留原轮廓并追加平移轮廓副本" in response.text
     assert "2026-06-16 18:05 +08:00" in response.text
     assert "转换接口改为先写入服务器临时 TTF 文件" in response.text
+    assert "2026-06-16 19:09 +08:00" in response.text
+    assert "转换流程改为后台任务模式" in response.text
     assert "选择要处理的字体 .ttf" in response.text
     assert "选择 B 目标字体" not in response.text
     assert "<span>水平效果" not in response.text

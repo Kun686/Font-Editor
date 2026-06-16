@@ -14,6 +14,14 @@ def test_frontend_explicitly_appends_optional_source_font_file():
     assert 'formData.append("source_font_file", sourceFile' in script
 
 
+def test_frontend_uses_background_conversion_jobs():
+    script = (BASE_DIR / "static" / "app.js").read_text(encoding="utf-8")
+
+    assert 'xhr.open("POST", "/api/convert-jobs")' in script
+    assert "function pollConversionJob" in script
+    assert "download_url" in script
+
+
 def test_frontend_previews_uploaded_fonts_before_conversion():
     script = (BASE_DIR / "static" / "app.js").read_text(encoding="utf-8")
 
@@ -52,7 +60,7 @@ def test_frontend_uses_single_weight_strength_input():
 def test_frontend_changelog_key_updates_for_latest_entry():
     script = (BASE_DIR / "static" / "app.js").read_text(encoding="utf-8")
 
-    assert "ttf-tool-changelog-2026-06-16-1805" in script
+    assert "ttf-tool-changelog-2026-06-16-1909" in script
 
 
 def test_frontend_uses_indeterminate_progress_during_conversion():

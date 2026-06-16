@@ -45,7 +45,7 @@ const previewFileUrls = {
   target: null,
   source: null,
 };
-const CHANGELOG_STORAGE_KEY = "ttf-tool-changelog-2026-06-16-1805";
+const CHANGELOG_STORAGE_KEY = "ttf-tool-changelog-2026-06-16-1909";
 let activeDownloadUrl = null;
 let progressTimer = null;
 
@@ -177,14 +177,16 @@ form.addEventListener("submit", async (event) => {
 
   try {
     const formData = buildConversionFormData();
-    const { blob, disposition } = await submitConversion(formData);
-    const filename = getDownloadName(disposition, file.name);
-    activeDownloadUrl = URL.createObjectURL(blob);
-    downloadLink.href = activeDownloadUrl;
+    const job = await submitConversionJob(formData);
+    setJobProgress(job);
+    const completedJob = await pollConversionJob(job.job_id);
+    const filename = completedJob.download_name || getDownloadName("", file.name);
+    const downloadUrl = completedJob.download_url;
+    downloadLink.href = downloadUrl;
     downloadLink.download = filename;
     downloadLink.textContent = `下载 ${filename}`;
     downloadLink.hidden = false;
-    applyPreviewFont(activeDownloadUrl);
+    applyPreviewFont(downloadUrl);
     setProgress(100, "转换完成");
     statusText.textContent = "转换完成，点击下载按钮保存文件";
   } catch (error) {
@@ -213,11 +215,10 @@ function isValidSpacing(value) {
   return Number.isFinite(value) && value >= -50 && value <= 50;
 }
 
-function submitConversion(formData) {
+function submitConversionJob(formData) {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    xhr.open("POST", "/api/convert");
-    xhr.responseType = "blob";
+    xhr.open("POST", "/api/convert-jobs");
 
     xhr.upload.addEventListener("progress", (event) => {
       if (!event.lengthComputable) {
@@ -229,17 +230,18 @@ function submitConversion(formData) {
     });
 
     xhr.upload.addEventListener("load", () => {
-      setProcessingProgress("正在转换字体...");
-      statusText.textContent = "正在转换字体...";
+      setProcessingProgress("正在创建后台任务...");
+      statusText.textContent = "正在创建后台任务...";
     });
 
     xhr.addEventListener("load", async () => {
       stopProgressTimer();
       if (xhr.status >= 200 && xhr.status < 300) {
-        resolve({
-          blob: xhr.response,
-          disposition: xhr.getResponseHeader("content-disposition"),
-        });
+        try {
+          resolve(JSON.parse(xhr.responseText));
+        } catch {
+          reject(new Error("后台任务响应无法读取"));
+        }
         return;
       }
 
@@ -248,15 +250,70 @@ function submitConversion(formData) {
 
     xhr.addEventListener("error", () => {
       stopProgressTimer();
-      reject(new Error("网络错误，转换请求未完成"));
+      reject(new Error("网络错误，后台任务未创建"));
     });
 
     xhr.addEventListener("abort", () => {
       stopProgressTimer();
-      reject(new Error("转换请求已取消"));
+      reject(new Error("后台任务请求已取消"));
     });
 
     xhr.send(formData);
+  });
+}
+
+async function pollConversionJob(jobId) {
+  if (!jobId) {
+    throw new Error("后台任务编号为空");
+  }
+
+  while (true) {
+    await delay(2000);
+    const response = await fetch(`/api/convert-jobs/${encodeURIComponent(jobId)}`, {
+      cache: "no-store",
+    });
+    if (!response.ok) {
+      throw new Error(await readFetchError(response));
+    }
+
+    const job = await response.json();
+    setJobProgress(job);
+    if (job.status === "complete") {
+      return job;
+    }
+    if (job.status === "failed") {
+      throw new Error(job.error || job.message || "转换失败");
+    }
+  }
+}
+
+function setJobProgress(job) {
+  if (!job) {
+    return;
+  }
+  if (job.status === "complete") {
+    setProgress(100, job.message || "转换完成");
+    statusText.textContent = job.message || "转换完成";
+    return;
+  }
+  if (job.status === "failed") {
+    setProgress(0, "转换失败");
+    statusText.textContent = "转换失败";
+    return;
+  }
+  if (job.status === "queued") {
+    setProgress(job.progress || 5, job.message || "排队等待转换");
+    statusText.textContent = job.message || "排队等待转换";
+    return;
+  }
+
+  setProcessingProgress(job.message || "后台正在转换字体...");
+  statusText.textContent = job.message || "后台正在转换字体...";
+}
+
+function delay(milliseconds) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, milliseconds);
   });
 }
 
@@ -285,6 +342,20 @@ async function readXhrError(xhr) {
     try {
       const data = JSON.parse(text);
       return data.detail || "转换失败";
+    } catch {
+      return "转换失败";
+    }
+  }
+  return text || "转换失败";
+}
+
+async function readFetchError(response) {
+  const contentType = response.headers.get("content-type") || "";
+  const text = await response.text();
+  if (contentType.includes("application/json")) {
+    try {
+      const data = JSON.parse(text);
+      return data.detail || data.error || "转换失败";
     } catch {
       return "转换失败";
     }
