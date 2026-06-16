@@ -47,7 +47,7 @@ const previewFileUrls = {
   target: null,
   source: null,
 };
-const CHANGELOG_STORAGE_KEY = "ttf-tool-changelog-2026-06-16-2001";
+const CHANGELOG_STORAGE_KEY = "ttf-tool-changelog-2026-06-16-2043";
 let activeDownloadUrl = null;
 let progressTimer = null;
 

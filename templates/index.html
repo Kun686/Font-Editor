@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>TTF 字体转换工具</title>
-    <link rel="stylesheet" href="/static/styles.css" />
+    <link rel="stylesheet" href="/static/styles.css?v=__STATIC_VERSION__" />
   </head>
   <body>
     <main class="page-shell">
@@ -234,6 +234,13 @@
             <button class="dialog-close" type="submit" aria-label="关闭">×</button>
           </div>
           <div class="changelog-entry">
+            <p class="changelog-time">2026-06-16 20:43 +08:00</p>
+            <ul class="changelog-list">
+              <li>字体转换改为独立子进程执行，避免大字体转换崩溃时拖垮 Web 服务并导致 Nginx 502。</li>
+              <li>静态资源增加版本号，部署后浏览器会加载最新前端脚本，减少旧缓存继续请求旧接口的问题。</li>
+            </ul>
+          </div>
+          <div class="changelog-entry">
             <p class="changelog-time">2026-06-16 20:01 +08:00</p>
             <ul class="changelog-list">
               <li>后台转换任务改为磁盘持久化，减少服务重启或任务恢复时出现“任务不存在或已过期”的情况。</li>
@@ -292,6 +299,6 @@
       </dialog>
     </main>
 
-    <script src="/static/app.js" defer></script>
+    <script src="/static/app.js?v=__STATIC_VERSION__" defer></script>
   </body>
 </html>

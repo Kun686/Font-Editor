@@ -8,6 +8,8 @@ import json
 import os
 from pathlib import Path
 import re
+import subprocess
+import sys
 import tempfile
 from threading import Lock
 import time
@@ -18,7 +20,7 @@ from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from font_processor import FontConversionError, replacement_characters, write_processed_ttf
+from font_processor import FontConversionError, replacement_characters
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -28,6 +30,7 @@ JOB_WORKERS = 1
 RUNTIME_DIR = BASE_DIR / "runtime"
 JOBS_DIR = RUNTIME_DIR / "jobs"
 RECENT_CONVERSION_FILE = RUNTIME_DIR / "recent-conversion.json"
+STATIC_VERSION = "20260616-2025"
 
 
 @asynccontextmanager
@@ -97,6 +100,7 @@ def _restore_incomplete_jobs() -> None:
 @app.get("/", response_class=HTMLResponse)
 def index() -> HTMLResponse:
     html = (BASE_DIR / "templates" / "index.html").read_text(encoding="utf-8")
+    html = html.replace("__STATIC_VERSION__", STATIC_VERSION)
     return HTMLResponse(html)
 
 
@@ -125,18 +129,6 @@ async def convert_font(
     replacement_enabled = bool(source_font_file and (source_font_file.filename or ""))
     if replacement_enabled and not (source_font_file.filename or "").lower().endswith(".ttf"):
         raise HTTPException(status_code=400, detail="来源字体只支持 .ttf 字体文件")
-
-    font_bytes = await _read_upload_bytes(font_file)
-    if len(font_bytes) > MAX_UPLOAD_BYTES:
-        raise HTTPException(status_code=413, detail="字体文件不能超过 50MB")
-
-    source_font_bytes = None
-    if replacement_enabled and source_font_file:
-        source_font_bytes = await _read_upload_bytes(source_font_file)
-        if not source_font_bytes:
-            raise HTTPException(status_code=400, detail="来源字体文件为空")
-        if len(source_font_bytes) > MAX_UPLOAD_BYTES:
-            raise HTTPException(status_code=413, detail="来源字体文件不能超过 50MB")
 
     effect_x, effect_y = _resolve_effect_form_values(
         effect_units,
@@ -167,30 +159,46 @@ async def convert_font(
         replacement_scope=replacement_scope if replacement_enabled else "",
     )
 
+    target_path: Path | None = None
+    source_path: Path | None = None
     output_path = _temporary_ttf_path()
     try:
-        with output_path.open("wb") as output_file:
-            write_processed_ttf(
-                font_bytes,
-                output_file,
-                scale_percent=scale_percent,
-                weight_mode=weight_mode,
-                effect_units=effect_units,
-                effect_x_units=effect_x,
-                effect_y_units=effect_y,
-                spacing_left_percent=spacing_left_percent,
-                spacing_right_percent=spacing_right_percent,
-                spacing_top_percent=spacing_top_percent,
-                spacing_bottom_percent=spacing_bottom_percent,
-                source_font_bytes=source_font_bytes,
-                replacement_chars=replacement_chars,
-            )
-    except FontConversionError as exc:
+        target_path, target_size = await _write_upload_to_temp(font_file, "字体文件不能超过 50MB")
+        if target_size == 0:
+            raise HTTPException(status_code=400, detail="字体文件为空")
+        if replacement_enabled and source_font_file:
+            source_path, source_size = await _write_upload_to_temp(source_font_file, "来源字体文件不能超过 50MB")
+            if source_size == 0:
+                raise HTTPException(status_code=400, detail="来源字体文件为空")
+        _run_worker_subprocess(
+            target_path,
+            source_path,
+            output_path,
+            {
+                "scale_percent": scale_percent,
+                "weight_mode": weight_mode,
+                "effect_units": effect_units,
+                "effect_x_units": effect_x,
+                "effect_y_units": effect_y,
+                "spacing_left_percent": spacing_left_percent,
+                "spacing_right_percent": spacing_right_percent,
+                "spacing_top_percent": spacing_top_percent,
+                "spacing_bottom_percent": spacing_bottom_percent,
+                "replacement_chars": replacement_chars,
+            },
+        )
+    except (FontConversionError, WorkerConversionError) as exc:
         _remove_file(output_path)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except HTTPException:
+        _remove_file(output_path)
+        raise
     except Exception:
         _remove_file(output_path)
         raise
+    finally:
+        _remove_optional_file(target_path)
+        _remove_optional_file(source_path)
 
     background_tasks.add_task(_remove_file, output_path)
     return FileResponse(
@@ -402,24 +410,7 @@ def _run_conversion_job(
         started_at=started_at,
     )
     try:
-        font_bytes = target_path.read_bytes()
-        source_font_bytes = source_path.read_bytes() if source_path else None
-        with output_path.open("wb") as output_file:
-            write_processed_ttf(
-                font_bytes,
-                output_file,
-                scale_percent=int(options["scale_percent"]),
-                weight_mode=str(options["weight_mode"]),
-                effect_units=options["effect_units"],
-                effect_x_units=options["effect_x_units"],
-                effect_y_units=options["effect_y_units"],
-                spacing_left_percent=float(options["spacing_left_percent"]),
-                spacing_right_percent=float(options["spacing_right_percent"]),
-                spacing_top_percent=float(options["spacing_top_percent"]),
-                spacing_bottom_percent=float(options["spacing_bottom_percent"]),
-                source_font_bytes=source_font_bytes,
-                replacement_chars=str(options["replacement_chars"]),
-            )
+        _run_worker_subprocess(target_path, source_path, output_path, options)
         completed_at = time.time()
         duration_seconds = completed_at - started_at
         _update_job(
@@ -436,19 +427,63 @@ def _run_conversion_job(
     except FontConversionError as exc:
         _remove_file(output_path)
         _update_job(job_id, status="failed", progress=0, message="转换失败", error=str(exc))
-    except Exception:
+    except WorkerConversionError as exc:
+        _remove_file(output_path)
+        _update_job(job_id, status="failed", progress=0, message="转换失败", error=str(exc))
+    except Exception as exc:
         _remove_file(output_path)
         _update_job(
             job_id,
             status="failed",
             progress=0,
             message="转换失败",
-            error="服务器转换失败，请查看后台日志",
+            error=str(exc) or "服务器转换失败，请查看后台日志",
         )
     finally:
         _remove_file(target_path)
         if source_path:
             _remove_file(source_path)
+
+
+class WorkerConversionError(RuntimeError):
+    pass
+
+
+def _run_worker_subprocess(
+    target_path: Path,
+    source_path: Path | None,
+    output_path: Path,
+    options: dict[str, object],
+) -> None:
+    worker_script = BASE_DIR / "conversion_worker.py"
+    command = [
+        sys.executable,
+        str(worker_script),
+        str(target_path),
+        str(source_path) if source_path else "",
+        str(output_path),
+        json.dumps(options, ensure_ascii=False),
+    ]
+    env = os.environ.copy()
+    env["PYTHONIOENCODING"] = "utf-8"
+    result = subprocess.run(
+        command,
+        cwd=BASE_DIR,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        env=env,
+    )
+    if result.returncode == 0:
+        return
+
+    message = (result.stderr or result.stdout or "").strip()
+    if not message:
+        message = f"转换进程异常退出，退出码 {result.returncode}"
+    if result.returncode < 0:
+        message = f"转换进程被系统终止，退出码 {result.returncode}"
+    raise WorkerConversionError(message)
 
 
 def _update_job(
@@ -840,13 +875,6 @@ def _format_effect_number(value: float) -> str:
 def _safe_file_part(value: str) -> str:
     safe = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", value)
     return safe.strip().strip(". ")
-
-
-async def _read_upload_bytes(upload: UploadFile) -> bytes:
-    try:
-        return await upload.read(MAX_UPLOAD_BYTES + 1)
-    finally:
-        await upload.close()
 
 
 def _resolve_effect_form_values(

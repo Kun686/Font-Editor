@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from fontTools.ttLib import TTFont
 import pytest
 
+import main
 from main import ConversionJob, RUNTIME_DIR, _job_payload, app, jobs, jobs_lock
 
 
@@ -156,6 +157,56 @@ def test_recent_conversion_reports_source_and_duration(sample_ttf_bytes):
     assert status_payload["recent_conversion"]["duration_seconds"] >= 0
 
 
+def test_worker_crash_marks_job_failed_without_losing_status(sample_ttf_bytes, monkeypatch):
+    def fail_worker(*_args, **_kwargs):
+        raise RuntimeError("worker crashed")
+
+    monkeypatch.setattr(main, "_run_worker_subprocess", fail_worker, raising=False)
+
+    response = client.post(
+        "/api/convert-jobs",
+        data={
+            "scale_percent": "100",
+            "weight_mode": "bold",
+            "effect_units": "5",
+        },
+        files={"font_file": ("demo.ttf", sample_ttf_bytes, "font/ttf")},
+    )
+    job_id = response.json()["job_id"]
+
+    for _ in range(50):
+        status_response = client.get(f"/api/convert-jobs/{job_id}")
+        assert status_response.status_code == 200
+        payload = status_response.json()
+        if payload["status"] == "failed":
+            break
+        sleep(0.05)
+    else:
+        raise AssertionError("conversion job did not fail")
+
+    assert payload["error"] == "worker crashed"
+
+
+def test_legacy_convert_worker_crash_returns_json_error(sample_ttf_bytes, monkeypatch):
+    def fail_worker(*_args, **_kwargs):
+        raise main.WorkerConversionError("worker crashed")
+
+    monkeypatch.setattr(main, "_run_worker_subprocess", fail_worker)
+
+    response = client.post(
+        "/api/convert",
+        data={
+            "scale_percent": "100",
+            "weight_mode": "bold",
+            "effect_units": "5",
+        },
+        files={"font_file": ("demo.ttf", sample_ttf_bytes, "font/ttf")},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "worker crashed"
+
+
 def test_convert_endpoint_replaces_characters_from_source_font(build_ttf_bytes):
     source = build_ttf_bytes({"1": (10, 0, 210, 400), "A": (30, 0, 430, 700)})
     target = build_ttf_bytes({"1": (60, 0, 160, 200), "B": (70, 0, 370, 500)})
@@ -216,6 +267,8 @@ def test_homepage_includes_spacing_controls_and_progress_bar():
     response = client.get("/")
 
     assert response.status_code == 200
+    assert '/static/styles.css?v=' in response.text
+    assert '/static/app.js?v=' in response.text
     assert 'id="changelog-dialog"' in response.text
     assert "2026-06-16 16:10 +08:00" in response.text
     assert "上传字体后立即预览当前字符效果" in response.text
@@ -230,6 +283,8 @@ def test_homepage_includes_spacing_controls_and_progress_bar():
     assert "转换流程改为后台任务模式" in response.text
     assert "2026-06-16 20:01 +08:00" in response.text
     assert "新增排队序号显示" in response.text
+    assert "2026-06-16 20:43 +08:00" in response.text
+    assert "字体转换改为独立子进程执行" in response.text
     assert "选择要处理的字体 .ttf" in response.text
     assert "选择 B 目标字体" not in response.text
     assert "<span>水平效果" not in response.text
