@@ -30,7 +30,7 @@ JOB_WORKERS = 1
 RUNTIME_DIR = BASE_DIR / "runtime"
 JOBS_DIR = RUNTIME_DIR / "jobs"
 RECENT_CONVERSION_FILE = RUNTIME_DIR / "recent-conversion.json"
-STATIC_VERSION = "20260616-2025"
+STATIC_VERSION = "20260616-2202"
 
 
 @asynccontextmanager

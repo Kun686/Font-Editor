@@ -285,6 +285,8 @@ def test_homepage_includes_spacing_controls_and_progress_bar():
     assert "新增排队序号显示" in response.text
     assert "2026-06-16 20:43 +08:00" in response.text
     assert "字体转换改为独立子进程执行" in response.text
+    assert "2026-06-16 22:02 +08:00" in response.text
+    assert "大字体 Bold 自动切换低内存轮廓外扩模式" in response.text
     assert "选择要处理的字体 .ttf" in response.text
     assert "选择 B 目标字体" not in response.text
     assert "<span>水平效果" not in response.text

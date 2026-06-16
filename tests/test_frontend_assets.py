@@ -67,7 +67,7 @@ def test_frontend_uses_single_weight_strength_input():
 def test_frontend_changelog_key_updates_for_latest_entry():
     script = (BASE_DIR / "static" / "app.js").read_text(encoding="utf-8")
 
-    assert "ttf-tool-changelog-2026-06-16-2043" in script
+    assert "ttf-tool-changelog-2026-06-16-2202" in script
 
 
 def test_frontend_uses_indeterminate_progress_during_conversion():

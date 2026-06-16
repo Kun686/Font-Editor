@@ -1,6 +1,7 @@
 from io import BytesIO
 
 import pytest
+import font_processor
 from fontTools.fontBuilder import FontBuilder
 from fontTools.pens.ttGlyphPen import TTGlyphPen
 from fontTools.ttLib import TTFont
@@ -206,6 +207,25 @@ def test_bold_effect_preserves_original_outline_and_adds_rounded_overlays(sample
     assert (46, -4, 446, 496) in contour_bounds
     assert (54, 4, 454, 504) in contour_bounds
     assert _glyph_bounds(font) == (45, -5, 455, 505)
+
+
+def test_large_font_bold_uses_low_memory_outline_expansion(sample_ttf_bytes, monkeypatch):
+    monkeypatch.setattr(font_processor, "BOLD_OVERLAY_MAX_GLYPHS", 0, raising=False)
+    source = _load_font(sample_ttf_bytes)
+    original_contours = source["glyf"]["A"].numberOfContours
+
+    converted = convert_ttf(
+        sample_ttf_bytes,
+        scale_percent=100,
+        weight_mode="bold",
+        effect_units=5,
+    )
+    font = _load_font(converted)
+    glyph = font["glyf"]["A"]
+
+    assert glyph.numberOfContours == original_contours
+    assert _glyph_bounds(font) == (46, -5, 454, 505)
+    assert font["hmtx"].metrics["A"] == (510, 45)
 
 
 def test_legacy_bold_effect_expands_horizontal_and_vertical_bounds(sample_ttf_bytes):

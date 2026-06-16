@@ -14,6 +14,7 @@ MIN_EFFECT_UNITS = 0
 MAX_EFFECT_UNITS = 500
 MIN_SPACING_PERCENT = -50
 MAX_SPACING_PERCENT = 50
+BOLD_OVERLAY_MAX_GLYPHS = 6000
 WEIGHT_MODES = {"none", "thin", "bold"}
 REPLACEMENT_SCOPES = {
     "digits": "0123456789",
@@ -545,8 +546,10 @@ def _apply_weight_effect(font: TTFont, mode: str, effect_x: int, effect_y: int) 
 
     glyf = font["glyf"]
     bold_offsets = _bold_overlay_offsets(effect_x, effect_y)
+    use_overlay_bold = mode == "bold" and _uses_overlay_bold(font)
     thin_delta_x = -effect_x
     thin_delta_y = -effect_y
+    composite_bold_glyphs = []
     for glyph_name in font.getGlyphOrder():
         glyph = glyf[glyph_name]
         glyph.expand(glyf)
@@ -554,7 +557,14 @@ def _apply_weight_effect(font: TTFont, mode: str, effect_x: int, effect_y: int) 
             continue
 
         if mode == "bold":
-            _append_bold_overlay(glyph, glyf, bold_offsets)
+            if use_overlay_bold:
+                _append_bold_overlay(glyph, glyf, bold_offsets)
+            elif glyph.isComposite():
+                composite_bold_glyphs.append(glyph)
+            else:
+                _embolden_glyph_contours(glyph, effect_x, effect_y)
+                glyph.coordinates.toInt()
+                glyph.recalcBounds(glyf)
         else:
             if glyph.isComposite():
                 glyph.tryRecalcBoundsComposite(glyf)
@@ -562,6 +572,9 @@ def _apply_weight_effect(font: TTFont, mode: str, effect_x: int, effect_y: int) 
             _offset_glyph_contours(glyph, thin_delta_x, thin_delta_y)
             glyph.coordinates.toInt()
             glyph.recalcBounds(glyf)
+
+    for glyph in composite_bold_glyphs:
+        glyph.tryRecalcBoundsComposite(glyf)
 
     if mode == "bold":
         _adjust_synthetic_bold_metrics(font, bold_offsets)
@@ -573,6 +586,10 @@ def _apply_weight_effect(font: TTFont, mode: str, effect_x: int, effect_y: int) 
 
 def _glyph_has_drawable_outline(glyph) -> bool:
     return glyph.isComposite() or glyph.numberOfContours > 0
+
+
+def _uses_overlay_bold(font: TTFont) -> bool:
+    return len(font.getGlyphOrder()) <= BOLD_OVERLAY_MAX_GLYPHS
 
 
 def _bold_overlay_offsets(effect_x: int, effect_y: int) -> tuple[tuple[int, int], ...]:
@@ -634,6 +651,43 @@ def _append_bold_overlay(glyph, glyf, offsets: tuple[tuple[int, int], ...]) -> N
     glyph.numberOfContours = len(glyph.endPtsOfContours)
     glyph.coordinates.toInt()
     glyph.recalcBounds(glyf)
+
+
+def _embolden_glyph_contours(glyph, delta_x: int, delta_y: int) -> None:
+    contours = _glyph_contours(glyph)
+    if not contours:
+        return
+
+    original = list(glyph.coordinates)
+    contour_points = [[original[index] for index in contour] for contour in contours]
+    contour_depths = _contour_depths(contour_points)
+    updates = {}
+
+    for contour, points, depth in zip(contours, contour_points, contour_depths):
+        if len(points) < 2:
+            continue
+
+        xs = [x for x, _ in points]
+        ys = [y for _, y in points]
+        center_x = (min(xs) + max(xs)) / 2
+        center_y = (min(ys) + max(ys)) / 2
+        invert_for_hole = depth % 2 == 1
+        for glyph_index, (x, y) in zip(contour, points):
+            direction_x, direction_y = _rounded_offset_direction(
+                x,
+                y,
+                center_x,
+                center_y,
+                invert_for_hole,
+            )
+            x, y = original[glyph_index]
+            updates[glyph_index] = (
+                _clamp_signed_16(_round(x + direction_x * delta_x)),
+                _clamp_signed_16(_round(y + direction_y * delta_y)),
+            )
+
+    for index, point in updates.items():
+        glyph.coordinates[index] = point
 
 
 def _refresh_glyph_counts(font: TTFont) -> None:
@@ -757,6 +811,27 @@ def _axis_offset_direction(value: int, center: float, invert: bool) -> int:
         return 0
     direction = -1 if value < center else 1
     return -direction if invert else direction
+
+
+def _rounded_offset_direction(
+    x: int,
+    y: int,
+    center_x: float,
+    center_y: float,
+    invert: bool,
+) -> tuple[float, float]:
+    distance_x = x - center_x
+    distance_y = y - center_y
+    distance = max(abs(distance_x), abs(distance_y))
+    if distance == 0:
+        return 0, 0
+
+    direction_x = distance_x / distance
+    direction_y = distance_y / distance
+    if invert:
+        direction_x = -direction_x
+        direction_y = -direction_y
+    return direction_x, direction_y
 
 
 def _glyph_contours(glyph) -> list[list[int]]:
