@@ -5,7 +5,13 @@ from fontTools.fontBuilder import FontBuilder
 from fontTools.pens.ttGlyphPen import TTGlyphPen
 from fontTools.ttLib import TTFont
 
-from font_processor import FontConversionError, convert_ttf, replace_ttf_characters, replacement_characters
+from font_processor import (
+    FontConversionError,
+    convert_ttf,
+    replace_ttf_characters,
+    replacement_characters,
+    write_processed_ttf,
+)
 
 
 def _load_font(data: bytes) -> TTFont:
@@ -156,6 +162,21 @@ def test_bold_effect_expands_horizontal_and_vertical_bounds(sample_ttf_bytes):
     assert font["hmtx"].metrics["A"] == (510, 45)
     assert font["hhea"].ascent == 805
     assert font["hhea"].descent == -205
+
+
+def test_write_processed_ttf_streams_converted_font(sample_ttf_bytes):
+    output = BytesIO()
+
+    write_processed_ttf(
+        sample_ttf_bytes,
+        output,
+        scale_percent=100,
+        weight_mode="bold",
+        effect_units=5,
+    )
+
+    font = _load_font(output.getvalue())
+    assert _glyph_bounds(font) == (45, -5, 455, 505)
 
 
 def test_bold_effect_preserves_original_outline_and_adds_rounded_overlays(sample_ttf_bytes):

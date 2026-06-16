@@ -96,6 +96,8 @@ def test_homepage_includes_spacing_controls_and_progress_bar():
     assert "字重强度改为单一字体单位输入" in response.text
     assert "2026-06-16 17:10 +08:00" in response.text
     assert "加粗算法改为保留原轮廓并追加平移轮廓副本" in response.text
+    assert "2026-06-16 18:05 +08:00" in response.text
+    assert "转换接口改为先写入服务器临时 TTF 文件" in response.text
     assert "选择要处理的字体 .ttf" in response.text
     assert "选择 B 目标字体" not in response.text
     assert "<span>水平效果" not in response.text

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from io import BytesIO
+from typing import BinaryIO
 
 from fontTools.pens.ttGlyphPen import TTGlyphPen
 from fontTools.ttLib import TTFont, TTLibError
@@ -76,6 +77,77 @@ def process_ttf(
     effect_x_percent: float | None = None,
     effect_y_percent: float | None = None,
 ) -> bytes:
+    font = _build_processed_ttf_font(
+        font_bytes,
+        scale_percent=scale_percent,
+        weight_mode=weight_mode,
+        effect_units=effect_units,
+        effect_x_units=effect_x_units,
+        effect_y_units=effect_y_units,
+        spacing_left_percent=spacing_left_percent,
+        spacing_right_percent=spacing_right_percent,
+        spacing_top_percent=spacing_top_percent,
+        spacing_bottom_percent=spacing_bottom_percent,
+        source_font_bytes=source_font_bytes,
+        replacement_chars=replacement_chars,
+        effect_x_percent=effect_x_percent,
+        effect_y_percent=effect_y_percent,
+    )
+    return _save_font(font, "字体转换失败")
+
+
+def write_processed_ttf(
+    font_bytes: bytes,
+    output_file: BinaryIO,
+    scale_percent: int,
+    weight_mode: str = "none",
+    effect_units: float | None = None,
+    effect_x_units: float | None = None,
+    effect_y_units: float | None = None,
+    spacing_left_percent: float = 0,
+    spacing_right_percent: float = 0,
+    spacing_top_percent: float = 0,
+    spacing_bottom_percent: float = 0,
+    source_font_bytes: bytes | None = None,
+    replacement_chars: str = "",
+    effect_x_percent: float | None = None,
+    effect_y_percent: float | None = None,
+) -> None:
+    font = _build_processed_ttf_font(
+        font_bytes,
+        scale_percent=scale_percent,
+        weight_mode=weight_mode,
+        effect_units=effect_units,
+        effect_x_units=effect_x_units,
+        effect_y_units=effect_y_units,
+        spacing_left_percent=spacing_left_percent,
+        spacing_right_percent=spacing_right_percent,
+        spacing_top_percent=spacing_top_percent,
+        spacing_bottom_percent=spacing_bottom_percent,
+        source_font_bytes=source_font_bytes,
+        replacement_chars=replacement_chars,
+        effect_x_percent=effect_x_percent,
+        effect_y_percent=effect_y_percent,
+    )
+    _save_font_to_file(font, output_file, "字体转换失败")
+
+
+def _build_processed_ttf_font(
+    font_bytes: bytes,
+    scale_percent: int,
+    weight_mode: str = "none",
+    effect_units: float | None = None,
+    effect_x_units: float | None = None,
+    effect_y_units: float | None = None,
+    spacing_left_percent: float = 0,
+    spacing_right_percent: float = 0,
+    spacing_top_percent: float = 0,
+    spacing_bottom_percent: float = 0,
+    source_font_bytes: bytes | None = None,
+    replacement_chars: str = "",
+    effect_x_percent: float | None = None,
+    effect_y_percent: float | None = None,
+) -> TTFont:
     font = _load_font(font_bytes)
     if source_font_bytes is not None:
         _replace_ttf_characters_in_font(source_font_bytes, font, replacement_chars)
@@ -93,7 +165,7 @@ def process_ttf(
         effect_x_percent=effect_x_percent,
         effect_y_percent=effect_y_percent,
     )
-    return _save_font(font, "字体转换失败")
+    return font
 
 
 def _apply_ttf_conversion(
@@ -358,11 +430,15 @@ def _load_font(font_bytes: bytes) -> TTFont:
 
 def _save_font(font: TTFont, error_message: str) -> bytes:
     output = BytesIO()
+    _save_font_to_file(font, output, error_message)
+    return output.getvalue()
+
+
+def _save_font_to_file(font: TTFont, output: BinaryIO, error_message: str) -> None:
     try:
         font.save(output)
     except Exception as exc:
         raise FontConversionError(error_message) from exc
-    return output.getvalue()
 
 
 def _require_replaceable_font(font: TTFont) -> None:

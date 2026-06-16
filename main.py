@@ -1,14 +1,16 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 import re
+import tempfile
 from urllib.parse import quote
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import HTMLResponse, Response
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from font_processor import FontConversionError, process_ttf, replacement_characters
+from font_processor import FontConversionError, replacement_characters, write_processed_ttf
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -26,6 +28,7 @@ def index() -> HTMLResponse:
 
 @app.post("/api/convert")
 async def convert_font(
+    background_tasks: BackgroundTasks,
     font_file: UploadFile = File(...),
     source_font_file: UploadFile | None = File(None),
     scale_percent: int = Form(100),
@@ -74,20 +77,6 @@ async def convert_font(
             if replacement_enabled
             else ""
         )
-        converted = process_ttf(
-            font_bytes,
-            scale_percent=scale_percent,
-            weight_mode=weight_mode,
-            effect_units=effect_units,
-            effect_x_units=effect_x,
-            effect_y_units=effect_y,
-            spacing_left_percent=spacing_left_percent,
-            spacing_right_percent=spacing_right_percent,
-            spacing_top_percent=spacing_top_percent,
-            spacing_bottom_percent=spacing_bottom_percent,
-            source_font_bytes=source_font_bytes,
-            replacement_chars=replacement_chars,
-        )
     except FontConversionError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -103,8 +92,35 @@ async def convert_font(
         spacing_bottom_percent=spacing_bottom_percent,
         replacement_scope=replacement_scope if replacement_enabled else "",
     )
-    return Response(
-        content=converted,
+
+    output_path = _temporary_ttf_path()
+    try:
+        with output_path.open("wb") as output_file:
+            write_processed_ttf(
+                font_bytes,
+                output_file,
+                scale_percent=scale_percent,
+                weight_mode=weight_mode,
+                effect_units=effect_units,
+                effect_x_units=effect_x,
+                effect_y_units=effect_y,
+                spacing_left_percent=spacing_left_percent,
+                spacing_right_percent=spacing_right_percent,
+                spacing_top_percent=spacing_top_percent,
+                spacing_bottom_percent=spacing_bottom_percent,
+                source_font_bytes=source_font_bytes,
+                replacement_chars=replacement_chars,
+            )
+    except FontConversionError as exc:
+        _remove_file(output_path)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception:
+        _remove_file(output_path)
+        raise
+
+    background_tasks.add_task(_remove_file, output_path)
+    return FileResponse(
+        path=output_path,
         media_type="font/ttf",
         headers={
             "Content-Disposition": (
@@ -114,6 +130,21 @@ async def convert_font(
             "Cache-Control": "no-store",
         },
     )
+
+
+def _temporary_ttf_path() -> Path:
+    handle = tempfile.NamedTemporaryFile(delete=False, suffix=".ttf")
+    try:
+        return Path(handle.name)
+    finally:
+        handle.close()
+
+
+def _remove_file(path: Path) -> None:
+    try:
+        os.remove(path)
+    except FileNotFoundError:
+        pass
 
 
 def _download_name(

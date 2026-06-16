@@ -230,6 +230,13 @@
             <button class="dialog-close" type="submit" aria-label="关闭">×</button>
           </div>
           <div class="changelog-entry">
+            <p class="changelog-time">2026-06-16 18:05 +08:00</p>
+            <ul class="changelog-list">
+              <li>转换接口改为先写入服务器临时 TTF 文件，再流式返回下载内容，降低大字体转换时的内存峰值。</li>
+              <li>针对宝塔/Nginx 502 场景优化响应方式，避免大结果文件在接口返回阶段再次复制到内存。</li>
+            </ul>
+          </div>
+          <div class="changelog-entry">
             <p class="changelog-time">2026-06-16 17:41 +08:00</p>
             <ul class="changelog-list">
               <li>Bold 加粗改为围绕原字形向左、右、上、下和斜向追加轮廓，减少只横向变粗的问题。</li>
