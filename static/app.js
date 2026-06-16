@@ -1,6 +1,8 @@
 const form = document.querySelector("#converter-form");
 const fileInput = document.querySelector("#font-file");
 const fileMeta = document.querySelector("#file-meta");
+const sourceFileInput = document.querySelector("#source-font-file");
+const sourceFileMeta = document.querySelector("#source-file-meta");
 const scaleInput = document.querySelector("#scale-percent");
 const scaleRange = document.querySelector("#scale-range");
 const effectXInput = document.querySelector("#effect-x");
@@ -18,14 +20,20 @@ const errorMessage = document.querySelector("#error-message");
 const progressBar = document.querySelector("#progress-bar");
 const progressLabel = document.querySelector("#progress-label");
 const progressPercent = document.querySelector("#progress-percent");
+const previewText = document.querySelector("#preview-text");
+const previewOutput = document.querySelector("#preview-output");
+const previewStyle = document.createElement("style");
 let activeDownloadUrl = null;
 let progressTimer = null;
+let previewFontFamily = null;
+
+document.head.appendChild(previewStyle);
 
 fileInput.addEventListener("change", () => {
   clearDownload();
   const file = fileInput.files[0];
   if (!file) {
-    fileMeta.textContent = "最大 50MB，文件只用于本次转换";
+    fileMeta.textContent = "输出会以 B 字体为基础";
     return;
   }
 
@@ -33,6 +41,21 @@ fileInput.addEventListener("change", () => {
   fileMeta.textContent = `${file.name} · ${sizeMb.toFixed(2)}MB`;
   statusText.textContent = "等待转换";
   setProgress(0, "等待开始");
+});
+
+sourceFileInput.addEventListener("change", () => {
+  const file = sourceFileInput.files[0];
+  if (!file) {
+    sourceFileMeta.textContent = "可选，用 A 的字符替换到 B";
+    return;
+  }
+
+  const sizeMb = file.size / 1024 / 1024;
+  sourceFileMeta.textContent = `${file.name} · ${sizeMb.toFixed(2)}MB`;
+});
+
+previewText.addEventListener("input", () => {
+  updatePreviewText();
 });
 
 scaleInput.addEventListener("input", () => {
@@ -58,6 +81,12 @@ form.addEventListener("submit", async (event) => {
     return;
   }
 
+  const sourceFile = sourceFileInput.files[0];
+  if (sourceFile && !sourceFile.name.toLowerCase().endsWith(".ttf")) {
+    showError("A 来源字体只支持 .ttf 字体文件");
+    return;
+  }
+
   const scale = Number(scaleInput.value);
   if (!Number.isInteger(scale) || scale < 10 || scale > 300) {
     showError("缩放比例必须在 10% 到 300% 之间");
@@ -67,12 +96,12 @@ form.addEventListener("submit", async (event) => {
   const effectX = Number(effectXInput.value);
   const effectY = Number(effectYInput.value);
   if (!isValidEffect(effectX) || !isValidEffect(effectY)) {
-    showError("水平和垂直效果数值必须在 -50 到 50 之间");
+    showError("水平和垂直效果数值必须在 -500 到 500 字体单位之间");
     return;
   }
 
   const spacingValues = spacingInputs.map((input) => Number(input.value));
-  if (spacingValues.some((value) => !isValidEffect(value))) {
+  if (spacingValues.some((value) => !isValidSpacing(value))) {
     showError("上下左右间距数值必须在 -50 到 50 之间");
     return;
   }
@@ -90,6 +119,7 @@ form.addEventListener("submit", async (event) => {
     downloadLink.download = filename;
     downloadLink.textContent = `下载 ${filename}`;
     downloadLink.hidden = false;
+    applyPreviewFont(activeDownloadUrl);
     setProgress(100, "转换完成");
     statusText.textContent = "转换完成，点击下载按钮保存文件";
   } catch (error) {
@@ -111,6 +141,10 @@ function clampNumber(value, min, max, fallback) {
 }
 
 function isValidEffect(value) {
+  return Number.isFinite(value) && value >= -500 && value <= 500;
+}
+
+function isValidSpacing(value) {
   return Number.isFinite(value) && value >= -50 && value <= 50;
 }
 
@@ -216,11 +250,31 @@ function getDownloadName(disposition, sourceName) {
   return sourceName.replace(/\.ttf$/i, "-converted.ttf");
 }
 
+function applyPreviewFont(fontUrl) {
+  previewFontFamily = `ConvertedPreview-${Date.now()}`;
+  previewStyle.textContent = `
+    @font-face {
+      font-family: "${previewFontFamily}";
+      src: url("${fontUrl}") format("truetype");
+    }
+  `;
+  previewOutput.style.fontFamily = `"${previewFontFamily}", "Microsoft YaHei", sans-serif`;
+  updatePreviewText();
+}
+
+function updatePreviewText() {
+  previewOutput.textContent = previewText.value || " ";
+}
+
 function clearDownload() {
   if (activeDownloadUrl) {
     URL.revokeObjectURL(activeDownloadUrl);
     activeDownloadUrl = null;
   }
+  previewStyle.textContent = "";
+  previewFontFamily = null;
+  previewOutput.style.removeProperty("font-family");
+  updatePreviewText();
   downloadLink.hidden = true;
   downloadLink.removeAttribute("href");
   downloadLink.removeAttribute("download");
@@ -237,3 +291,5 @@ function clearError() {
   errorMessage.hidden = true;
   errorMessage.textContent = "";
 }
+
+updatePreviewText();

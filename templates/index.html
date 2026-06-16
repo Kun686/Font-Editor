@@ -13,15 +13,29 @@
           <p class="eyebrow">Server-side TTF Converter</p>
           <h1 id="page-title">TTF 字体转换工具</h1>
           <p class="summary">
-            上传字体后在服务器内存中处理，支持缩放、Thin、Bold、水平和垂直字形效果。
+            上传字体后在服务器内存中处理，支持缩放、Thin、Bold、排版间距和 A/B 字体字符替换。
           </p>
+
+          <div class="preview-panel" aria-label="当前字符效果">
+            <label class="field">
+              <span>预览文本</span>
+              <textarea id="preview-text" rows="3">0123456789 ABCXYZ abcxyz +-*/.,</textarea>
+            </label>
+            <div id="preview-output" class="preview-output">0123456789 ABCXYZ abcxyz +-*/.,</div>
+          </div>
         </div>
 
         <form id="converter-form" class="converter-form">
           <label class="file-drop">
             <input id="font-file" name="font_file" type="file" accept=".ttf,font/ttf" required />
-            <span class="file-drop-title">选择 .ttf 文件</span>
-            <span id="file-meta" class="file-drop-meta">最大 50MB，文件只用于本次转换</span>
+            <span class="file-drop-title">选择 B 目标字体 .ttf</span>
+            <span id="file-meta" class="file-drop-meta">输出会以 B 字体为基础</span>
+          </label>
+
+          <label class="file-drop compact-drop">
+            <input id="source-font-file" name="source_font_file" type="file" accept=".ttf,font/ttf" />
+            <span class="file-drop-title">选择 A 来源字体 .ttf</span>
+            <span id="source-file-meta" class="file-drop-meta">可选，用 A 的字符替换到 B</span>
           </label>
 
           <div class="control-grid">
@@ -63,33 +77,62 @@
 
           <div class="effect-grid">
             <label class="field">
-              <span>水平效果 (%)</span>
+              <span>水平效果 (字体单位)</span>
               <input
                 id="effect-x"
-                name="effect_x_percent"
+                name="effect_x_units"
                 type="number"
-                min="-50"
-                max="50"
-                step="0.1"
+                min="-500"
+                max="500"
+                step="1"
                 value="0"
                 inputmode="decimal"
               />
             </label>
 
             <label class="field">
-              <span>垂直效果 (%)</span>
+              <span>垂直效果 (字体单位)</span>
               <input
                 id="effect-y"
-                name="effect_y_percent"
+                name="effect_y_units"
                 type="number"
-                min="-50"
-                max="50"
-                step="0.1"
+                min="-500"
+                max="500"
+                step="1"
                 value="0"
                 inputmode="decimal"
               />
             </label>
           </div>
+
+          <fieldset class="replacement-panel">
+            <legend>A → B 字符替换</legend>
+            <div class="replacement-grid">
+              <label class="field">
+                <span>替换范围</span>
+                <select id="replacement-scope" name="replacement_scope">
+                  <option value="digits">仅数字 0-9</option>
+                  <option value="uppercase">仅大写字母 A-Z</option>
+                  <option value="lowercase">仅小写字母 a-z</option>
+                  <option value="letters">大小写字母 A-Z a-z</option>
+                  <option value="digits_letters">数字和字母</option>
+                  <option value="custom">仅自定义字符</option>
+                </select>
+              </label>
+
+              <label class="field">
+                <span>追加自定义字符</span>
+                <input
+                  id="custom-replacement-chars"
+                  name="custom_replacement_chars"
+                  type="text"
+                  value=""
+                  placeholder="+-*/.,"
+                  autocomplete="off"
+                />
+              </label>
+            </div>
+          </fieldset>
 
           <fieldset class="spacing-panel">
             <legend>排版间距 (%)</legend>

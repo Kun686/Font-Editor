@@ -5,7 +5,7 @@ from fontTools.fontBuilder import FontBuilder
 from fontTools.pens.ttGlyphPen import TTGlyphPen
 from fontTools.ttLib import TTFont
 
-from font_processor import FontConversionError, convert_ttf
+from font_processor import FontConversionError, convert_ttf, replace_ttf_characters, replacement_characters
 
 
 def _load_font(data: bytes) -> TTFont:
@@ -120,14 +120,14 @@ def test_bold_effect_expands_horizontal_and_vertical_bounds(sample_ttf_bytes):
         sample_ttf_bytes,
         scale_percent=100,
         weight_mode="bold",
-        effect_x_percent=5,
-        effect_y_percent=7,
+        effect_x_units=5,
+        effect_y_units=7,
     )
     font = _load_font(converted)
 
     assert "A" in font.getGlyphOrder()
-    assert _glyph_bounds(font) == (0, -70, 500, 570)
-    assert font["hmtx"].metrics["A"][0] == 600
+    assert _glyph_bounds(font) == (45, -7, 455, 507)
+    assert font["hmtx"].metrics["A"][0] == 510
 
 
 def test_bold_effect_offsets_holes_inward_instead_of_scaling_from_center():
@@ -135,14 +135,14 @@ def test_bold_effect_offsets_holes_inward_instead_of_scaling_from_center():
         _hollow_square_font(),
         scale_percent=100,
         weight_mode="bold",
-        effect_x_percent=5,
-        effect_y_percent=5,
+        effect_x_units=5,
+        effect_y_units=5,
     )
     font = _load_font(converted)
 
     assert _glyph_contour_bounds(font, "O") == [
-        (-50, -50, 1050, 1050),
-        (450, 250, 550, 750),
+        (-5, -5, 1005, 1005),
+        (405, 205, 595, 795),
     ]
 
 
@@ -151,14 +151,64 @@ def test_thin_effect_contracts_horizontal_and_vertical_bounds(sample_ttf_bytes):
         sample_ttf_bytes,
         scale_percent=100,
         weight_mode="thin",
-        effect_x_percent=3,
-        effect_y_percent=4,
+        effect_x_units=3,
+        effect_y_units=4,
     )
     font = _load_font(converted)
 
     assert "A" in font.getGlyphOrder()
-    assert _glyph_bounds(font) == (80, 40, 420, 460)
-    assert font["hmtx"].metrics["A"][0] == 440
+    assert _glyph_bounds(font) == (53, 4, 447, 496)
+    assert font["hmtx"].metrics["A"][0] == 494
+
+
+def test_replacement_characters_builds_presets_with_custom_symbols():
+    assert replacement_characters("digits", "") == "0123456789"
+    assert replacement_characters("uppercase", "") == "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    assert replacement_characters("lowercase", "") == "abcdefghijklmnopqrstuvwxyz"
+    assert replacement_characters("digits_letters", "+-+1") == (
+        "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz+-"
+    )
+    assert replacement_characters("custom", "+-+1") == "+-1"
+
+
+def test_replace_ttf_characters_overwrites_existing_and_adds_missing_chars(build_ttf_bytes):
+    source = build_ttf_bytes(
+        {
+            "1": (10, 0, 210, 400),
+            "2": (20, 0, 220, 420),
+            "A": (30, 0, 430, 700),
+        }
+    )
+    target = build_ttf_bytes(
+        {
+            "1": (60, 0, 160, 200),
+            "B": (70, 0, 370, 500),
+        }
+    )
+
+    converted = replace_ttf_characters(source, target, "12A")
+    font = _load_font(converted)
+    cmap = font.getBestCmap()
+
+    assert _glyph_bounds(font, cmap[ord("1")]) == (10, 0, 210, 400)
+    assert _glyph_bounds(font, cmap[ord("2")]) == (20, 0, 220, 420)
+    assert _glyph_bounds(font, cmap[ord("A")]) == (30, 0, 430, 700)
+    assert _glyph_bounds(font, cmap[ord("B")]) == (70, 0, 370, 500)
+    assert font["hmtx"].metrics[cmap[ord("1")]] == (260, 10)
+    assert font["hmtx"].metrics[cmap[ord("2")]] == (270, 20)
+
+
+def test_replace_ttf_characters_scales_source_glyphs_to_target_units(build_ttf_bytes):
+    source = build_ttf_bytes({"7": (200, 0, 1200, 1600)}, units_per_em=2000)
+    target = build_ttf_bytes({"7": (50, 0, 250, 500)}, units_per_em=1000)
+
+    converted = replace_ttf_characters(source, target, "7")
+    font = _load_font(converted)
+    cmap = font.getBestCmap()
+
+    assert font["head"].unitsPerEm == 1000
+    assert _glyph_bounds(font, cmap[ord("7")]) == (100, 0, 600, 800)
+    assert font["hmtx"].metrics[cmap[ord("7")]] == (625, 100)
 
 
 @pytest.mark.parametrize("scale", [0, 9, 301, 1000])
@@ -173,14 +223,14 @@ def test_rejects_unknown_weight_mode(sample_ttf_bytes, weight_mode):
         convert_ttf(sample_ttf_bytes, scale_percent=100, weight_mode=weight_mode)
 
 
-@pytest.mark.parametrize("effect", [-51, 51])
+@pytest.mark.parametrize("effect", [-501, 501])
 def test_rejects_extreme_effect_values(sample_ttf_bytes, effect):
     with pytest.raises(FontConversionError):
         convert_ttf(
             sample_ttf_bytes,
             scale_percent=100,
             weight_mode="bold",
-            effect_x_percent=effect,
+            effect_x_units=effect,
         )
 
 

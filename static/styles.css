@@ -132,6 +132,11 @@ h1 {
   overflow-wrap: anywhere;
 }
 
+.compact-drop {
+  min-height: 116px;
+  padding: 18px;
+}
+
 .control-grid,
 .effect-grid {
   display: grid;
@@ -165,6 +170,27 @@ h1 {
   gap: 12px;
 }
 
+.replacement-panel {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.replacement-panel legend {
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.replacement-grid {
+  display: grid;
+  grid-template-columns: minmax(160px, 0.86fr) minmax(0, 1.14fr);
+  gap: 12px;
+}
+
 .field,
 .range-field {
   display: grid;
@@ -173,7 +199,9 @@ h1 {
   font-size: 14px;
 }
 
-.field input[type="number"] {
+.field input[type="number"],
+.field select,
+.field textarea {
   width: 100%;
   min-height: 44px;
   padding: 0 12px;
@@ -183,6 +211,21 @@ h1 {
   font: inherit;
   font-size: 17px;
   background: #fff;
+}
+
+.field select {
+  appearance: none;
+  background:
+    linear-gradient(45deg, transparent 50%, var(--muted) 50%) calc(100% - 18px) 52% / 6px 6px no-repeat,
+    linear-gradient(135deg, var(--muted) 50%, transparent 50%) calc(100% - 13px) 52% / 6px 6px no-repeat,
+    #fff;
+}
+
+.field textarea {
+  min-height: 84px;
+  padding: 10px 12px;
+  resize: vertical;
+  line-height: 1.5;
 }
 
 .field input[type="text"] {
@@ -199,6 +242,8 @@ h1 {
 
 .field input[type="number"]:focus,
 .field input[type="text"]:focus,
+.field select:focus,
+.field textarea:focus,
 .range-field input:focus-visible {
   outline: 3px solid rgba(15, 118, 110, 0.18);
   border-color: var(--accent);
@@ -254,6 +299,24 @@ h1 {
   border-color: var(--accent);
   color: var(--accent-dark);
   background: var(--accent-soft);
+}
+
+.preview-panel {
+  display: grid;
+  gap: 12px;
+  margin-top: 8px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+
+.preview-output {
+  min-height: 136px;
+  padding: 14px 0;
+  color: var(--ink);
+  font-size: 40px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .progress-panel {
@@ -408,6 +471,7 @@ button:disabled {
   .control-grid,
   .effect-grid,
   .spacing-grid,
+  .replacement-grid,
   .actions {
     grid-template-columns: 1fr;
   }

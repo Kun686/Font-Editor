@@ -1,18 +1,28 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from io import BytesIO
 from math import hypot
 
+from fontTools.pens.ttGlyphPen import TTGlyphPen
 from fontTools.ttLib import TTFont, TTLibError
 
 
 MIN_SCALE_PERCENT = 10
 MAX_SCALE_PERCENT = 300
-MIN_EFFECT_PERCENT = -50
-MAX_EFFECT_PERCENT = 50
+MIN_EFFECT_UNITS = -500
+MAX_EFFECT_UNITS = 500
 MIN_SPACING_PERCENT = -50
 MAX_SPACING_PERCENT = 50
 WEIGHT_MODES = {"none", "thin", "bold"}
+REPLACEMENT_SCOPES = {
+    "digits": "0123456789",
+    "uppercase": "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+    "lowercase": "abcdefghijklmnopqrstuvwxyz",
+    "letters": "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
+    "digits_letters": "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
+    "custom": "",
+}
 
 
 class FontConversionError(ValueError):
@@ -23,21 +33,26 @@ def convert_ttf(
     font_bytes: bytes,
     scale_percent: int,
     weight_mode: str = "none",
-    effect_x_percent: float = 0,
-    effect_y_percent: float = 0,
+    effect_x_units: float | None = None,
+    effect_y_units: float | None = None,
     spacing_left_percent: float = 0,
     spacing_right_percent: float = 0,
     spacing_top_percent: float = 0,
     spacing_bottom_percent: float = 0,
+    effect_x_percent: float | None = None,
+    effect_y_percent: float | None = None,
 ) -> bytes:
+    effect_x_units = _resolve_effect_units(effect_x_units, effect_x_percent)
+    effect_y_units = _resolve_effect_units(effect_y_units, effect_y_percent)
+
     if not font_bytes:
         raise FontConversionError("上传的字体文件为空")
     if scale_percent < MIN_SCALE_PERCENT or scale_percent > MAX_SCALE_PERCENT:
         raise FontConversionError("缩放比例必须在 10% 到 300% 之间")
     if weight_mode not in WEIGHT_MODES:
         raise FontConversionError("字形效果必须是 none、thin 或 bold")
-    _validate_effect_value(effect_x_percent)
-    _validate_effect_value(effect_y_percent)
+    _validate_effect_value(effect_x_units)
+    _validate_effect_value(effect_y_units)
     _validate_spacing_value(spacing_left_percent)
     _validate_spacing_value(spacing_right_percent)
     _validate_spacing_value(spacing_top_percent)
@@ -63,8 +78,8 @@ def convert_ttf(
         _apply_weight_effect(
             font,
             mode=weight_mode,
-            effect_x=_effect_to_units(font, effect_x_percent),
-            effect_y=_effect_to_units(font, effect_y_percent),
+            effect_x=_round(effect_x_units),
+            effect_y=_round(effect_y_units),
         )
 
     _apply_layout_spacing(
@@ -80,6 +95,57 @@ def convert_ttf(
         font.save(output)
     except Exception as exc:
         raise FontConversionError("字体转换失败") from exc
+    return output.getvalue()
+
+
+def replacement_characters(scope: str, custom_chars: str) -> str:
+    if scope not in REPLACEMENT_SCOPES:
+        raise FontConversionError("替换范围必须是 digits、uppercase、lowercase、letters、digits_letters 或 custom")
+    return _unique_chars(REPLACEMENT_SCOPES[scope] + (custom_chars or ""))
+
+
+def replace_ttf_characters(source_font_bytes: bytes, target_font_bytes: bytes, characters: str) -> bytes:
+    if not source_font_bytes:
+        raise FontConversionError("来源字体文件为空")
+    if not target_font_bytes:
+        raise FontConversionError("目标字体文件为空")
+
+    source = _load_font(source_font_bytes)
+    target = _load_font(target_font_bytes)
+    _require_replaceable_font(source)
+    _require_replaceable_font(target)
+
+    source_cmap = source.getBestCmap() or {}
+    target_glyf = target["glyf"]
+    glyph_order = target.getGlyphOrder()
+    scale = target["head"].unitsPerEm / source["head"].unitsPerEm
+
+    for character in _unique_chars(characters):
+        source_glyph_name = source_cmap.get(ord(character))
+        if not source_glyph_name:
+            continue
+
+        target_glyph_name = _replacement_glyph_name(ord(character))
+        if target_glyph_name not in glyph_order:
+            glyph_order.append(target_glyph_name)
+
+        glyph = _copied_simple_glyph(source["glyf"][source_glyph_name], source["glyf"])
+        _scale_copied_glyph(glyph, target_glyf, scale)
+        target_glyf.glyphs[target_glyph_name] = glyph
+        target["hmtx"].metrics[target_glyph_name] = _scaled_metric(source["hmtx"].metrics[source_glyph_name], scale)
+        _map_character_to_glyph(target, ord(character), target_glyph_name)
+
+    target.setGlyphOrder(glyph_order)
+    if "maxp" in target:
+        target["maxp"].numGlyphs = len(glyph_order)
+    if "hhea" in target:
+        target["hhea"].numberOfHMetrics = len(glyph_order)
+
+    output = BytesIO()
+    try:
+        target.save(output)
+    except Exception as exc:
+        raise FontConversionError("字体字符替换失败") from exc
     return output.getvalue()
 
 
@@ -223,18 +289,90 @@ def _scale_kern_table(font: TTFont, scale: float) -> None:
         }
 
 
+def _load_font(font_bytes: bytes) -> TTFont:
+    try:
+        return TTFont(BytesIO(font_bytes), recalcBBoxes=True, recalcTimestamp=False)
+    except TTLibError as exc:
+        raise FontConversionError("无法读取 TTF 字体文件") from exc
+
+
+def _require_replaceable_font(font: TTFont) -> None:
+    if "glyf" not in font or "hmtx" not in font or "cmap" not in font:
+        raise FontConversionError("当前仅支持包含 TrueType glyf 轮廓和 cmap 映射的 .ttf 字体")
+
+
+def _unique_chars(value: str) -> str:
+    seen = set()
+    output = []
+    for character in value:
+        if character in seen:
+            continue
+        seen.add(character)
+        output.append(character)
+    return "".join(output)
+
+
+def _replacement_glyph_name(codepoint: int) -> str:
+    return f"replace_uni{codepoint:04X}"
+
+
+def _copied_simple_glyph(source_glyph, source_glyf):
+    source_glyph.expand(source_glyf)
+    if source_glyph.isComposite():
+        pen = TTGlyphPen(None)
+        source_glyph.draw(pen, source_glyf)
+        return pen.glyph()
+    return deepcopy(source_glyph)
+
+
+def _scale_copied_glyph(glyph, target_glyf, scale: float) -> None:
+    if scale == 1:
+        glyph.recalcBounds(target_glyf)
+        return
+    if glyph.numberOfContours > 0:
+        glyph.coordinates.scale((scale, scale))
+        glyph.coordinates.toInt()
+        glyph.recalcBounds(target_glyf)
+
+
+def _scaled_metric(metric: tuple[int, int], scale: float) -> tuple[int, int]:
+    advance, side_bearing = metric
+    return (
+        _clamp_unsigned_16(_round(advance * scale)),
+        _clamp_signed_16(_round(side_bearing * scale)),
+    )
+
+
+def _map_character_to_glyph(font: TTFont, codepoint: int, glyph_name: str) -> None:
+    mapped = False
+    for table in font["cmap"].tables:
+        if not table.isUnicode():
+            continue
+        if table.format == 4 and codepoint > 0xFFFF:
+            continue
+        table.cmap[codepoint] = glyph_name
+        mapped = True
+
+    if not mapped:
+        raise FontConversionError("目标字体缺少可写入的 Unicode cmap 表")
+
+
+def _resolve_effect_units(effect_units: float | None, legacy_effect_value: float | None) -> float:
+    if effect_units is not None:
+        return effect_units
+    if legacy_effect_value is not None:
+        return legacy_effect_value
+    return 0
+
+
 def _validate_effect_value(value: float) -> None:
-    if value < MIN_EFFECT_PERCENT or value > MAX_EFFECT_PERCENT:
-        raise FontConversionError("效果数值必须在 -50 到 50 之间")
+    if value < MIN_EFFECT_UNITS or value > MAX_EFFECT_UNITS:
+        raise FontConversionError("效果数值必须在 -500 到 500 字体单位之间")
 
 
 def _validate_spacing_value(value: float) -> None:
     if value < MIN_SPACING_PERCENT or value > MAX_SPACING_PERCENT:
         raise FontConversionError("间距数值必须在 -50 到 50 之间")
-
-
-def _effect_to_units(font: TTFont, percent: float) -> int:
-    return _round(font["head"].unitsPerEm * percent / 100)
 
 
 def _spacing_to_units(font: TTFont, percent: float) -> int:
