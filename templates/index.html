@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TTF 字体转换工具</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="page-shell">
+      <section class="tool-panel" aria-labelledby="page-title">
+        <div class="heading">
+          <p class="eyebrow">Server-side TTF Converter</p>
+          <h1 id="page-title">TTF 字体转换工具</h1>
+          <p class="summary">
+            上传字体后在服务器内存中处理，支持缩放、Thin、Bold、水平和垂直字形效果。
+          </p>
+        </div>
+
+        <form id="converter-form" class="converter-form">
+          <label class="file-drop">
+            <input id="font-file" name="font_file" type="file" accept=".ttf,font/ttf" required />
+            <span class="file-drop-title">选择 .ttf 文件</span>
+            <span id="file-meta" class="file-drop-meta">最大 50MB，文件只用于本次转换</span>
+          </label>
+
+          <div class="control-grid">
+            <label class="field">
+              <span>缩放比例 (%)</span>
+              <input
+                id="scale-percent"
+                name="scale_percent"
+                type="number"
+                min="10"
+                max="300"
+                step="1"
+                value="100"
+                inputmode="numeric"
+              />
+            </label>
+
+            <label class="range-field">
+              <span>快速调整</span>
+              <input id="scale-range" type="range" min="10" max="300" step="1" value="100" />
+            </label>
+          </div>
+
+          <fieldset class="mode-group">
+            <legend>字形转换</legend>
+            <label>
+              <input type="radio" name="weight_mode" value="none" checked />
+              <span>不处理</span>
+            </label>
+            <label>
+              <input type="radio" name="weight_mode" value="thin" />
+              <span>Thin 变细</span>
+            </label>
+            <label>
+              <input type="radio" name="weight_mode" value="bold" />
+              <span>Bold 加粗</span>
+            </label>
+          </fieldset>
+
+          <div class="effect-grid">
+            <label class="field">
+              <span>水平效果 (%)</span>
+              <input
+                id="effect-x"
+                name="effect_x_percent"
+                type="number"
+                min="-50"
+                max="50"
+                step="0.1"
+                value="0"
+                inputmode="decimal"
+              />
+            </label>
+
+            <label class="field">
+              <span>垂直效果 (%)</span>
+              <input
+                id="effect-y"
+                name="effect_y_percent"
+                type="number"
+                min="-50"
+                max="50"
+                step="0.1"
+                value="0"
+                inputmode="decimal"
+              />
+            </label>
+          </div>
+
+          <div class="actions">
+            <button id="submit-button" type="submit">开始转换</button>
+            <a id="download-link" class="download-link" href="#" download hidden>下载转换后的字体</a>
+            <p id="status" class="status" role="status">等待上传字体</p>
+          </div>
+
+          <p id="error-message" class="error-message" role="alert" hidden></p>
+        </form>
+      </section>
+
+      <section class="notice" aria-label="处理说明">
+        <strong>处理说明</strong>
+        <span>文件会上传到服务器进行高兼容转换，但应用不会永久保存上传文件或转换结果。</span>
+      </section>
+    </main>
+
+    <script src="/static/app.js" defer></script>
+  </body>
+</html>
