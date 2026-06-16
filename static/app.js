@@ -21,37 +21,81 @@ const progressBar = document.querySelector("#progress-bar");
 const progressLabel = document.querySelector("#progress-label");
 const progressPercent = document.querySelector("#progress-percent");
 const previewText = document.querySelector("#preview-text");
-const previewOutput = document.querySelector("#preview-output");
-const previewStyle = document.createElement("style");
+const changelogButton = document.querySelector("#changelog-button");
+const changelogDialog = document.querySelector("#changelog-dialog");
+const previewSlots = {
+  target: {
+    card: document.querySelector("#target-preview-card"),
+    output: document.querySelector("#target-preview-output"),
+    style: document.createElement("style"),
+  },
+  source: {
+    card: document.querySelector("#source-preview-card"),
+    output: document.querySelector("#source-preview-output"),
+    style: document.createElement("style"),
+  },
+  result: {
+    card: document.querySelector("#result-preview-card"),
+    output: document.querySelector("#preview-output"),
+    style: document.createElement("style"),
+  },
+};
+const previewFileUrls = {
+  target: null,
+  source: null,
+};
+const CHANGELOG_STORAGE_KEY = "ttf-tool-changelog-2026-06-16-1610";
 let activeDownloadUrl = null;
 let progressTimer = null;
-let previewFontFamily = null;
 
-document.head.appendChild(previewStyle);
+Object.values(previewSlots).forEach((slot) => {
+  document.head.appendChild(slot.style);
+});
+
+if (changelogButton && changelogDialog) {
+  changelogButton.addEventListener("click", () => {
+    openChangelog();
+  });
+
+  changelogDialog.addEventListener("close", () => {
+    markChangelogSeen();
+  });
+
+  window.addEventListener("load", () => {
+    if (!hasSeenChangelog()) {
+      openChangelog();
+    }
+  });
+}
 
 fileInput.addEventListener("change", () => {
   clearDownload();
   const file = fileInput.files[0];
   if (!file) {
-    fileMeta.textContent = "输出会以 B 字体为基础";
+    clearFilePreview("target");
+    fileMeta.textContent = "用于缩放、加粗、变细或作为字符替换目标";
     return;
   }
 
   const sizeMb = file.size / 1024 / 1024;
   fileMeta.textContent = `${file.name} · ${sizeMb.toFixed(2)}MB`;
+  applyFilePreview("target", file);
   statusText.textContent = "等待转换";
   setProgress(0, "等待开始");
 });
 
 sourceFileInput.addEventListener("change", () => {
+  clearDownload();
   const file = sourceFileInput.files[0];
   if (!file) {
-    sourceFileMeta.textContent = "可选，用 A 的字符替换到 B";
+    clearFilePreview("source");
+    sourceFileMeta.textContent = "上传后可把 A 的指定字符替换到当前字体";
     return;
   }
 
   const sizeMb = file.size / 1024 / 1024;
   sourceFileMeta.textContent = `${file.name} · ${sizeMb.toFixed(2)}MB`;
+  applyFilePreview("source", file);
 });
 
 previewText.addEventListener("input", () => {
@@ -111,7 +155,7 @@ form.addEventListener("submit", async (event) => {
   setProgress(0, "准备上传");
 
   try {
-    const formData = new FormData(form);
+    const formData = buildConversionFormData();
     const { blob, disposition } = await submitConversion(formData);
     const filename = getDownloadName(disposition, file.name);
     activeDownloadUrl = URL.createObjectURL(blob);
@@ -164,8 +208,7 @@ function submitConversion(formData) {
     });
 
     xhr.upload.addEventListener("load", () => {
-      setProgress(75, "正在转换字体...");
-      startProcessingProgress();
+      setProcessingProgress("正在转换字体...");
       statusText.textContent = "正在转换字体...";
     });
 
@@ -196,6 +239,24 @@ function submitConversion(formData) {
   });
 }
 
+function buildConversionFormData() {
+  const formData = new FormData(form);
+  const targetFile = fileInput.files[0];
+  const sourceFile = sourceFileInput.files[0];
+
+  formData.delete("font_file");
+  if (targetFile) {
+    formData.append("font_file", targetFile, targetFile.name);
+  }
+
+  formData.delete("source_font_file");
+  if (sourceFile) {
+    formData.append("source_font_file", sourceFile, sourceFile.name);
+  }
+
+  return formData;
+}
+
 async function readXhrError(xhr) {
   const contentType = xhr.getResponseHeader("content-type") || "";
   const text = xhr.response instanceof Blob ? await xhr.response.text() : xhr.responseText;
@@ -212,19 +273,18 @@ async function readXhrError(xhr) {
 
 function setProgress(percent, label) {
   const bounded = Math.min(100, Math.max(0, Math.round(percent)));
+  progressBar.max = 100;
+  progressBar.setAttribute("value", String(bounded));
   progressBar.value = bounded;
   progressPercent.textContent = `${bounded}%`;
   progressLabel.textContent = label;
 }
 
-function startProcessingProgress() {
+function setProcessingProgress(label) {
   stopProgressTimer();
-  progressTimer = window.setInterval(() => {
-    const current = Number(progressBar.value);
-    if (current < 95) {
-      setProgress(current + 1, "正在转换字体...");
-    }
-  }, 250);
+  progressBar.removeAttribute("value");
+  progressPercent.textContent = "处理中";
+  progressLabel.textContent = label;
 }
 
 function stopProgressTimer() {
@@ -251,19 +311,34 @@ function getDownloadName(disposition, sourceName) {
 }
 
 function applyPreviewFont(fontUrl) {
-  previewFontFamily = `ConvertedPreview-${Date.now()}`;
-  previewStyle.textContent = `
+  setPreviewFont("result", fontUrl);
+}
+
+function applyFilePreview(slotName, file) {
+  clearFilePreview(slotName);
+  previewFileUrls[slotName] = URL.createObjectURL(file);
+  setPreviewFont(slotName, previewFileUrls[slotName]);
+}
+
+function setPreviewFont(slotName, fontUrl) {
+  const slot = previewSlots[slotName];
+  const fontFamily = `${slotName}Preview-${Date.now()}`;
+  slot.style.textContent = `
     @font-face {
-      font-family: "${previewFontFamily}";
+      font-family: "${fontFamily}";
       src: url("${fontUrl}") format("truetype");
     }
   `;
-  previewOutput.style.fontFamily = `"${previewFontFamily}", "Microsoft YaHei", sans-serif`;
+  slot.output.style.fontFamily = `"${fontFamily}", "Microsoft YaHei", sans-serif`;
+  slot.card.hidden = false;
   updatePreviewText();
 }
 
 function updatePreviewText() {
-  previewOutput.textContent = previewText.value || " ";
+  const text = previewText.value || " ";
+  Object.values(previewSlots).forEach((slot) => {
+    slot.output.textContent = text;
+  });
 }
 
 function clearDownload() {
@@ -271,15 +346,28 @@ function clearDownload() {
     URL.revokeObjectURL(activeDownloadUrl);
     activeDownloadUrl = null;
   }
-  previewStyle.textContent = "";
-  previewFontFamily = null;
-  previewOutput.style.removeProperty("font-family");
+  clearPreviewSlot("result");
   updatePreviewText();
   downloadLink.hidden = true;
   downloadLink.removeAttribute("href");
   downloadLink.removeAttribute("download");
   downloadLink.textContent = "下载转换后的字体";
   setProgress(0, "等待开始");
+}
+
+function clearFilePreview(slotName) {
+  if (previewFileUrls[slotName]) {
+    URL.revokeObjectURL(previewFileUrls[slotName]);
+    previewFileUrls[slotName] = null;
+  }
+  clearPreviewSlot(slotName);
+}
+
+function clearPreviewSlot(slotName) {
+  const slot = previewSlots[slotName];
+  slot.style.textContent = "";
+  slot.output.style.removeProperty("font-family");
+  slot.card.hidden = true;
 }
 
 function showError(message) {
@@ -290,6 +378,36 @@ function showError(message) {
 function clearError() {
   errorMessage.hidden = true;
   errorMessage.textContent = "";
+}
+
+function openChangelog() {
+  if (!changelogDialog) {
+    return;
+  }
+  if (changelogDialog.open) {
+    return;
+  }
+  if (typeof changelogDialog.showModal === "function") {
+    changelogDialog.showModal();
+    return;
+  }
+  changelogDialog.setAttribute("open", "");
+}
+
+function hasSeenChangelog() {
+  try {
+    return window.localStorage.getItem(CHANGELOG_STORAGE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function markChangelogSeen() {
+  try {
+    window.localStorage.setItem(CHANGELOG_STORAGE_KEY, "1");
+  } catch {
+    // localStorage can be unavailable in private or restricted browser contexts.
+  }
 }
 
 updatePreviewText();

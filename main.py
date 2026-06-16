@@ -8,7 +8,7 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from font_processor import FontConversionError, convert_ttf, replace_ttf_characters, replacement_characters
+from font_processor import FontConversionError, process_ttf, replacement_characters
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -44,32 +44,31 @@ async def convert_font(
     filename = font_file.filename or ""
     if not filename.lower().endswith(".ttf"):
         raise HTTPException(status_code=400, detail="只支持 .ttf 字体文件")
-    if source_font_file and not (source_font_file.filename or "").lower().endswith(".ttf"):
+    replacement_enabled = bool(source_font_file and (source_font_file.filename or ""))
+    if replacement_enabled and not (source_font_file.filename or "").lower().endswith(".ttf"):
         raise HTTPException(status_code=400, detail="来源字体只支持 .ttf 字体文件")
 
     font_bytes = await _read_upload_bytes(font_file)
     if len(font_bytes) > MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail="字体文件不能超过 50MB")
 
-    replacement_enabled = source_font_file is not None
-    if source_font_file:
+    source_font_bytes = None
+    if replacement_enabled and source_font_file:
         source_font_bytes = await _read_upload_bytes(source_font_file)
+        if not source_font_bytes:
+            raise HTTPException(status_code=400, detail="来源字体文件为空")
         if len(source_font_bytes) > MAX_UPLOAD_BYTES:
             raise HTTPException(status_code=413, detail="来源字体文件不能超过 50MB")
-        try:
-            font_bytes = replace_ttf_characters(
-                source_font_bytes,
-                font_bytes,
-                replacement_characters(replacement_scope, custom_replacement_chars),
-            )
-        except FontConversionError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     effect_x = _resolve_effect_form_value(effect_x_units, effect_x_percent)
     effect_y = _resolve_effect_form_value(effect_y_units, effect_y_percent)
-
     try:
-        converted = convert_ttf(
+        replacement_chars = (
+            replacement_characters(replacement_scope, custom_replacement_chars)
+            if replacement_enabled
+            else ""
+        )
+        converted = process_ttf(
             font_bytes,
             scale_percent=scale_percent,
             weight_mode=weight_mode,
@@ -79,6 +78,8 @@ async def convert_font(
             spacing_right_percent=spacing_right_percent,
             spacing_top_percent=spacing_top_percent,
             spacing_bottom_percent=spacing_bottom_percent,
+            source_font_bytes=source_font_bytes,
+            replacement_chars=replacement_chars,
         )
     except FontConversionError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

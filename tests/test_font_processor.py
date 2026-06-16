@@ -70,6 +70,33 @@ def _hollow_square_font() -> bytes:
     return _save_font(builder.font)
 
 
+def _custom_glyph_font(points: list[tuple[int, int]]) -> bytes:
+    pen = TTGlyphPen(None)
+    pen.moveTo(points[0])
+    for point in points[1:]:
+        pen.lineTo(point)
+    pen.closePath()
+
+    builder = FontBuilder(1000, isTTF=True)
+    builder.setupGlyphOrder([".notdef", "A"])
+    builder.setupCharacterMap({65: "A"})
+    builder.setupGlyf({".notdef": TTGlyphPen(None).glyph(), "A": pen.glyph()})
+    builder.setupHorizontalMetrics({".notdef": (500, 0), "A": (1000, 0)})
+    builder.setupHorizontalHeader(ascent=800, descent=-200)
+    builder.setupNameTable(
+        {
+            "familyName": "CustomGlyph",
+            "styleName": "Regular",
+            "uniqueFontIdentifier": "CustomGlyph Regular",
+            "fullName": "CustomGlyph Regular",
+            "psName": "CustomGlyph-Regular",
+        }
+    )
+    builder.setupOS2(sTypoAscender=800, sTypoDescender=-200, usWinAscent=800, usWinDescent=200)
+    builder.setupPost()
+    return _save_font(builder.font)
+
+
 def test_scale_changes_metrics_and_keeps_units_per_em(sample_ttf_bytes):
     converted = convert_ttf(sample_ttf_bytes, scale_percent=150)
     font = _load_font(converted)
@@ -144,6 +171,23 @@ def test_bold_effect_offsets_holes_inward_instead_of_scaling_from_center():
         (-5, -5, 1005, 1005),
         (405, 205, 595, 795),
     ]
+
+
+def test_bold_effect_limits_point_movement_to_requested_units():
+    source_points = [(0, 0), (500, 1), (1000, 0), (500, 800)]
+    converted = convert_ttf(
+        _custom_glyph_font(source_points),
+        scale_percent=100,
+        weight_mode="bold",
+        effect_x_units=10,
+        effect_y_units=10,
+    )
+    font = _load_font(converted)
+    output_points = list(font["glyf"]["A"].coordinates)
+
+    for (source_x, source_y), (output_x, output_y) in zip(source_points, output_points):
+        assert abs(output_x - source_x) <= 10
+        assert abs(output_y - source_y) <= 10
 
 
 def test_thin_effect_contracts_horizontal_and_vertical_bounds(sample_ttf_bytes):

@@ -13,29 +13,37 @@
           <p class="eyebrow">Server-side TTF Converter</p>
           <h1 id="page-title">TTF 字体转换工具</h1>
           <p class="summary">
-            上传字体后在服务器内存中处理，支持缩放、Thin、Bold、排版间距和 A/B 字体字符替换。
+            上传字体后在服务器内存中处理，支持缩放、Thin、Bold、排版间距和可选字符替换。
           </p>
+          <button id="changelog-button" class="secondary-button" type="button">更新日志</button>
 
           <div class="preview-panel" aria-label="当前字符效果">
             <label class="field">
               <span>预览文本</span>
               <textarea id="preview-text" rows="3">0123456789 ABCXYZ abcxyz +-*/.,</textarea>
             </label>
-            <div id="preview-output" class="preview-output">0123456789 ABCXYZ abcxyz +-*/.,</div>
+            <div class="preview-list">
+              <div id="target-preview-card" class="font-preview-card" hidden>
+                <span class="preview-label">当前字体</span>
+                <div id="target-preview-output" class="preview-output">0123456789 ABCXYZ abcxyz +-*/.,</div>
+              </div>
+              <div id="source-preview-card" class="font-preview-card" hidden>
+                <span class="preview-label">A 来源字体</span>
+                <div id="source-preview-output" class="preview-output">0123456789 ABCXYZ abcxyz +-*/.,</div>
+              </div>
+              <div id="result-preview-card" class="font-preview-card" hidden>
+                <span class="preview-label">转换后结果</span>
+                <div id="preview-output" class="preview-output">0123456789 ABCXYZ abcxyz +-*/.,</div>
+              </div>
+            </div>
           </div>
         </div>
 
         <form id="converter-form" class="converter-form">
           <label class="file-drop">
             <input id="font-file" name="font_file" type="file" accept=".ttf,font/ttf" required />
-            <span class="file-drop-title">选择 B 目标字体 .ttf</span>
-            <span id="file-meta" class="file-drop-meta">输出会以 B 字体为基础</span>
-          </label>
-
-          <label class="file-drop compact-drop">
-            <input id="source-font-file" name="source_font_file" type="file" accept=".ttf,font/ttf" />
-            <span class="file-drop-title">选择 A 来源字体 .ttf</span>
-            <span id="source-file-meta" class="file-drop-meta">可选，用 A 的字符替换到 B</span>
+            <span class="file-drop-title">选择要处理的字体 .ttf</span>
+            <span id="file-meta" class="file-drop-meta">用于缩放、加粗、变细或作为字符替换目标</span>
           </label>
 
           <div class="control-grid">
@@ -106,7 +114,12 @@
           </div>
 
           <fieldset class="replacement-panel">
-            <legend>A → B 字符替换</legend>
+            <legend>可选：字符替换</legend>
+            <label class="file-drop compact-drop">
+              <input id="source-font-file" name="source_font_file" type="file" accept=".ttf,font/ttf" />
+              <span class="file-drop-title">可选：选择 A 来源字体 .ttf</span>
+              <span id="source-file-meta" class="file-drop-meta">上传后可把 A 的指定字符替换到当前字体</span>
+            </label>
             <div class="replacement-grid">
               <label class="field">
                 <span>替换范围</span>
@@ -217,6 +230,25 @@
         <strong>处理说明</strong>
         <span>文件会上传到服务器进行高兼容转换，但应用不会永久保存上传文件或转换结果。</span>
       </section>
+
+      <dialog id="changelog-dialog" class="changelog-dialog" aria-labelledby="changelog-title">
+        <form method="dialog">
+          <div class="dialog-header">
+            <h2 id="changelog-title">更新日志</h2>
+            <button class="dialog-close" type="submit" aria-label="关闭">×</button>
+          </div>
+          <p class="changelog-time">2026-06-16 16:10 +08:00</p>
+          <ul class="changelog-list">
+            <li>主流程改为只需上传一个要处理的字体，A 来源字体移入可选字符替换模块。</li>
+            <li>上传字体后立即预览当前字符效果；同时上传 A 和当前字体时分别显示两套预览。</li>
+            <li>转换完成后显示最终替换、缩放、加粗和间距处理后的预览。</li>
+            <li>修复 A → 当前字体字符替换未提交、旧下载结果未清理的问题。</li>
+            <li>修复进度条停在 95% 的显示问题，转换阶段改为不定进度。</li>
+            <li>加粗和变细改为按字体单位控制，减少尖角字形被过度拉伸的问题。</li>
+            <li>合并替换和转换流程，减少大字体的重复保存和读取时间。</li>
+          </ul>
+        </form>
+      </dialog>
     </main>
 
     <script src="/static/app.js" defer></script>

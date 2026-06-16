@@ -89,6 +89,14 @@ def test_homepage_includes_spacing_controls_and_progress_bar():
     response = client.get("/")
 
     assert response.status_code == 200
+    assert 'id="changelog-dialog"' in response.text
+    assert "2026-06-16 16:10 +08:00" in response.text
+    assert "上传字体后立即预览当前字符效果" in response.text
+    assert "修复进度条停在 95%" in response.text
+    assert "选择要处理的字体 .ttf" in response.text
+    assert "选择 B 目标字体" not in response.text
+    assert "可选：字符替换" in response.text
+    assert "可选：选择 A 来源字体 .ttf" in response.text
     assert 'id="download-link"' in response.text
     assert 'id="spacing-left"' in response.text
     assert 'id="spacing-right"' in response.text
@@ -98,6 +106,8 @@ def test_homepage_includes_spacing_controls_and_progress_bar():
     assert 'id="source-font-file"' in response.text
     assert 'id="replacement-scope"' in response.text
     assert 'id="custom-replacement-chars"' in response.text
+    assert 'id="target-preview-output"' in response.text
+    assert 'id="source-preview-output"' in response.text
     assert 'id="preview-output"' in response.text
 
 

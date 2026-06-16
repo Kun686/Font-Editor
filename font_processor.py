@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from copy import deepcopy
 from io import BytesIO
-from math import hypot
 
 from fontTools.pens.ttGlyphPen import TTGlyphPen
 from fontTools.ttLib import TTFont, TTLibError
@@ -42,11 +41,73 @@ def convert_ttf(
     effect_x_percent: float | None = None,
     effect_y_percent: float | None = None,
 ) -> bytes:
+    font = _load_font(font_bytes)
+    _apply_ttf_conversion(
+        font,
+        scale_percent=scale_percent,
+        weight_mode=weight_mode,
+        effect_x_units=effect_x_units,
+        effect_y_units=effect_y_units,
+        spacing_left_percent=spacing_left_percent,
+        spacing_right_percent=spacing_right_percent,
+        spacing_top_percent=spacing_top_percent,
+        spacing_bottom_percent=spacing_bottom_percent,
+        effect_x_percent=effect_x_percent,
+        effect_y_percent=effect_y_percent,
+    )
+    return _save_font(font, "字体转换失败")
+
+
+def process_ttf(
+    font_bytes: bytes,
+    scale_percent: int,
+    weight_mode: str = "none",
+    effect_x_units: float | None = None,
+    effect_y_units: float | None = None,
+    spacing_left_percent: float = 0,
+    spacing_right_percent: float = 0,
+    spacing_top_percent: float = 0,
+    spacing_bottom_percent: float = 0,
+    source_font_bytes: bytes | None = None,
+    replacement_chars: str = "",
+    effect_x_percent: float | None = None,
+    effect_y_percent: float | None = None,
+) -> bytes:
+    font = _load_font(font_bytes)
+    if source_font_bytes is not None:
+        _replace_ttf_characters_in_font(source_font_bytes, font, replacement_chars)
+    _apply_ttf_conversion(
+        font,
+        scale_percent=scale_percent,
+        weight_mode=weight_mode,
+        effect_x_units=effect_x_units,
+        effect_y_units=effect_y_units,
+        spacing_left_percent=spacing_left_percent,
+        spacing_right_percent=spacing_right_percent,
+        spacing_top_percent=spacing_top_percent,
+        spacing_bottom_percent=spacing_bottom_percent,
+        effect_x_percent=effect_x_percent,
+        effect_y_percent=effect_y_percent,
+    )
+    return _save_font(font, "字体转换失败")
+
+
+def _apply_ttf_conversion(
+    font: TTFont,
+    scale_percent: int,
+    weight_mode: str = "none",
+    effect_x_units: float | None = None,
+    effect_y_units: float | None = None,
+    spacing_left_percent: float = 0,
+    spacing_right_percent: float = 0,
+    spacing_top_percent: float = 0,
+    spacing_bottom_percent: float = 0,
+    effect_x_percent: float | None = None,
+    effect_y_percent: float | None = None,
+) -> None:
     effect_x_units = _resolve_effect_units(effect_x_units, effect_x_percent)
     effect_y_units = _resolve_effect_units(effect_y_units, effect_y_percent)
 
-    if not font_bytes:
-        raise FontConversionError("上传的字体文件为空")
     if scale_percent < MIN_SCALE_PERCENT or scale_percent > MAX_SCALE_PERCENT:
         raise FontConversionError("缩放比例必须在 10% 到 300% 之间")
     if weight_mode not in WEIGHT_MODES:
@@ -57,11 +118,6 @@ def convert_ttf(
     _validate_spacing_value(spacing_right_percent)
     _validate_spacing_value(spacing_top_percent)
     _validate_spacing_value(spacing_bottom_percent)
-
-    try:
-        font = TTFont(BytesIO(font_bytes), recalcBBoxes=True, recalcTimestamp=False)
-    except TTLibError as exc:
-        raise FontConversionError("无法读取 TTF 字体文件") from exc
 
     if "glyf" not in font or "hmtx" not in font:
         raise FontConversionError("当前仅支持包含 TrueType glyf 轮廓的 .ttf 字体")
@@ -90,13 +146,6 @@ def convert_ttf(
         bottom=_spacing_to_units(font, spacing_bottom_percent),
     )
 
-    output = BytesIO()
-    try:
-        font.save(output)
-    except Exception as exc:
-        raise FontConversionError("字体转换失败") from exc
-    return output.getvalue()
-
 
 def replacement_characters(scope: str, custom_chars: str) -> str:
     if scope not in REPLACEMENT_SCOPES:
@@ -110,8 +159,13 @@ def replace_ttf_characters(source_font_bytes: bytes, target_font_bytes: bytes, c
     if not target_font_bytes:
         raise FontConversionError("目标字体文件为空")
 
-    source = _load_font(source_font_bytes)
     target = _load_font(target_font_bytes)
+    _replace_ttf_characters_in_font(source_font_bytes, target, characters)
+    return _save_font(target, "字体字符替换失败")
+
+
+def _replace_ttf_characters_in_font(source_font_bytes: bytes, target: TTFont, characters: str) -> None:
+    source = _load_font(source_font_bytes)
     _require_replaceable_font(source)
     _require_replaceable_font(target)
 
@@ -140,13 +194,6 @@ def replace_ttf_characters(source_font_bytes: bytes, target_font_bytes: bytes, c
         target["maxp"].numGlyphs = len(glyph_order)
     if "hhea" in target:
         target["hhea"].numberOfHMetrics = len(glyph_order)
-
-    output = BytesIO()
-    try:
-        target.save(output)
-    except Exception as exc:
-        raise FontConversionError("字体字符替换失败") from exc
-    return output.getvalue()
 
 
 def _scale_glyf_table(font: TTFont, scale: float) -> None:
@@ -290,10 +337,22 @@ def _scale_kern_table(font: TTFont, scale: float) -> None:
 
 
 def _load_font(font_bytes: bytes) -> TTFont:
+    if not font_bytes:
+        raise FontConversionError("上传的字体文件为空")
+
     try:
         return TTFont(BytesIO(font_bytes), recalcBBoxes=True, recalcTimestamp=False)
     except TTLibError as exc:
         raise FontConversionError("无法读取 TTF 字体文件") from exc
+
+
+def _save_font(font: TTFont, error_message: str) -> bytes:
+    output = BytesIO()
+    try:
+        font.save(output)
+    except Exception as exc:
+        raise FontConversionError(error_message) from exc
+    return output.getvalue()
 
 
 def _require_replaceable_font(font: TTFont) -> None:
@@ -494,24 +553,29 @@ def _offset_glyph_contours(glyph, delta_x: int, delta_y: int) -> None:
         if len(points) < 2:
             continue
 
-        area = _contour_area(points)
-        if area == 0:
-            continue
-
+        xs = [x for x, _ in points]
+        ys = [y for _, y in points]
+        center_x = (min(xs) + max(xs)) / 2
+        center_y = (min(ys) + max(ys)) / 2
         invert_for_hole = depth % 2 == 1
-        for local_index, glyph_index in enumerate(contour):
-            normal = _contour_miter_normal(points, local_index, area, invert_for_hole)
-            if normal is None:
-                continue
-
+        for glyph_index, (x, y) in zip(contour, points):
+            direction_x = _axis_offset_direction(x, center_x, invert_for_hole)
+            direction_y = _axis_offset_direction(y, center_y, invert_for_hole)
             x, y = original[glyph_index]
             updates[glyph_index] = (
-                _clamp_signed_16(_round(x + normal[0] * delta_x)),
-                _clamp_signed_16(_round(y + normal[1] * delta_y)),
+                _clamp_signed_16(_round(x + direction_x * delta_x)),
+                _clamp_signed_16(_round(y + direction_y * delta_y)),
             )
 
     for index, point in updates.items():
         glyph.coordinates[index] = point
+
+
+def _axis_offset_direction(value: int, center: float, invert: bool) -> int:
+    if value == center:
+        return 0
+    direction = -1 if value < center else 1
+    return -direction if invert else direction
 
 
 def _glyph_contours(glyph) -> list[list[int]]:
@@ -537,14 +601,6 @@ def _contour_depths(contours: list[list[tuple[int, int]]]) -> list[int]:
     return depths
 
 
-def _contour_area(points: list[tuple[int, int]]) -> float:
-    area = 0.0
-    for index, (x1, y1) in enumerate(points):
-        x2, y2 = points[(index + 1) % len(points)]
-        area += x1 * y2 - x2 * y1
-    return area / 2
-
-
 def _point_in_contour(point: tuple[int, int], contour: list[tuple[int, int]]) -> bool:
     x, y = point
     inside = False
@@ -557,77 +613,6 @@ def _point_in_contour(point: tuple[int, int], contour: list[tuple[int, int]]) ->
                 inside = not inside
         previous_x, previous_y = current_x, current_y
     return inside
-
-
-def _contour_miter_normal(
-    points: list[tuple[int, int]],
-    index: int,
-    area: float,
-    invert_for_hole: bool,
-) -> tuple[float, float] | None:
-    previous = _distinct_contour_point(points, index, -1)
-    current = points[index]
-    next_point = _distinct_contour_point(points, index, 1)
-    if previous is None or next_point is None:
-        return None
-
-    incoming = _segment_fill_outward_normal(previous, current, area, invert_for_hole)
-    outgoing = _segment_fill_outward_normal(current, next_point, area, invert_for_hole)
-    if incoming is None or outgoing is None:
-        return None
-
-    normal_x = incoming[0] + outgoing[0]
-    normal_y = incoming[1] + outgoing[1]
-    length = hypot(normal_x, normal_y)
-    if length == 0:
-        return outgoing
-
-    normal_x /= length
-    normal_y /= length
-    projection = normal_x * outgoing[0] + normal_y * outgoing[1]
-    if abs(projection) < 0.01:
-        return normal_x, normal_y
-
-    miter_scale = max(-4.0, min(4.0, 1 / projection))
-    return normal_x * miter_scale, normal_y * miter_scale
-
-
-def _distinct_contour_point(
-    points: list[tuple[int, int]],
-    index: int,
-    step: int,
-) -> tuple[int, int] | None:
-    current = points[index]
-    for offset in range(1, len(points)):
-        candidate = points[(index + step * offset) % len(points)]
-        if candidate != current:
-            return candidate
-    return None
-
-
-def _segment_fill_outward_normal(
-    start: tuple[int, int],
-    end: tuple[int, int],
-    area: float,
-    invert_for_hole: bool,
-) -> tuple[float, float] | None:
-    dx = end[0] - start[0]
-    dy = end[1] - start[1]
-    length = hypot(dx, dy)
-    if length == 0:
-        return None
-
-    if area > 0:
-        normal_x = dy / length
-        normal_y = -dx / length
-    else:
-        normal_x = -dy / length
-        normal_y = dx / length
-
-    if invert_for_hole:
-        normal_x = -normal_x
-        normal_y = -normal_y
-    return normal_x, normal_y
 
 
 def _adjust_horizontal_metrics(font: TTFont, delta_x: int) -> None:
