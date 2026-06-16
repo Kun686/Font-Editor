@@ -29,6 +29,38 @@ def test_frontend_uses_background_conversion_jobs():
     assert "recent_conversion" in script
 
 
+def test_frontend_loads_initial_studio_status():
+    script = (BASE_DIR / "static" / "app.js").read_text(encoding="utf-8")
+
+    assert "function loadStudioStatus" in script
+    assert 'fetch("/api/status"' in script
+    assert "recent_conversions" in script
+    assert "function renderRecentConversions" in script
+
+
+def test_frontend_reuses_download_blob_for_result_preview():
+    script = (BASE_DIR / "static" / "app.js").read_text(encoding="utf-8")
+
+    assert "function prepareCompletedDownload" in script
+    assert "URL.createObjectURL(blob)" in script
+    assert "await applyPreviewFont(activeDownloadUrl)" in script
+    assert "new FontFace" in script
+
+
+def test_frontend_includes_studio_motion_components():
+    script = (BASE_DIR / "static" / "app.js").read_text(encoding="utf-8")
+    styles = (BASE_DIR / "static" / "styles.css").read_text(encoding="utf-8")
+    markup = (BASE_DIR / "templates" / "index.html").read_text(encoding="utf-8")
+
+    assert "function initTextFlipBadges" in script
+    assert "function initStudioBackground" in script
+    assert 'id="studio-background"' in markup
+    assert 'data-text-flip' in markup
+    assert ".text-flip-badge" in styles
+    assert ".studio-background" in styles
+    assert "prefers-reduced-motion" in styles
+
+
 def test_frontend_previews_uploaded_fonts_before_conversion():
     script = (BASE_DIR / "static" / "app.js").read_text(encoding="utf-8")
 
@@ -67,7 +99,7 @@ def test_frontend_uses_single_weight_strength_input():
 def test_frontend_changelog_key_updates_for_latest_entry():
     script = (BASE_DIR / "static" / "app.js").read_text(encoding="utf-8")
 
-    assert "ttf-tool-changelog-2026-06-16-2202" in script
+    assert "ttf-tool-changelog-2026-06-16-2248" in script
 
 
 def test_frontend_uses_indeterminate_progress_during_conversion():

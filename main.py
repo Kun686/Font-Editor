@@ -27,10 +27,11 @@ BASE_DIR = Path(__file__).resolve().parent
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 JOB_TTL_SECONDS = 6 * 60 * 60
 JOB_WORKERS = 1
+RECENT_CONVERSION_LIMIT = 5
 RUNTIME_DIR = BASE_DIR / "runtime"
 JOBS_DIR = RUNTIME_DIR / "jobs"
 RECENT_CONVERSION_FILE = RUNTIME_DIR / "recent-conversion.json"
-STATIC_VERSION = "20260616-2202"
+STATIC_VERSION = "20260616-2248"
 
 
 @asynccontextmanager
@@ -102,6 +103,24 @@ def index() -> HTMLResponse:
     html = (BASE_DIR / "templates" / "index.html").read_text(encoding="utf-8")
     html = html.replace("__STATIC_VERSION__", STATIC_VERSION)
     return HTMLResponse(html)
+
+
+@app.get("/api/status")
+def get_status() -> dict[str, object]:
+    _cleanup_old_jobs()
+    active_jobs = _active_jobs_snapshot()
+    running_jobs = sum(1 for job in active_jobs if job.status == "running")
+    queued_jobs = sum(1 for job in active_jobs if job.status == "queued")
+    active_count = len(active_jobs)
+    recent_conversions = _recent_conversions_payload()
+    return {
+        "active_jobs": active_count,
+        "running_jobs": running_jobs,
+        "queued_jobs": queued_jobs,
+        "queue_message": _queue_message(active_count, running_jobs, queued_jobs),
+        "recent_conversion": recent_conversions[0] if recent_conversions else None,
+        "recent_conversions": recent_conversions,
+    }
 
 
 @app.post("/api/convert")
@@ -538,9 +557,11 @@ def _get_job_from_memory_or_disk(job_id: str) -> ConversionJob | None:
 
 def _job_payload(job: ConversionJob) -> dict[str, object]:
     queue_position = _job_queue_position(job)
-    recent_conversion = _recent_conversion_payload()
+    recent_conversions = _recent_conversions_payload()
+    recent_conversion = recent_conversions[0] if recent_conversions else None
     if recent_conversion is None and job.status == "complete" and job.duration_seconds is not None:
         recent_conversion = _recent_conversion_from_job(job)
+        recent_conversions = [recent_conversion]
     payload: dict[str, object] = {
         "job_id": job.job_id,
         "status": job.status,
@@ -550,6 +571,7 @@ def _job_payload(job: ConversionJob) -> dict[str, object]:
         "queue_position": queue_position,
         "queued_ahead": max(0, queue_position - 1) if queue_position else 0,
         "recent_conversion": recent_conversion,
+        "recent_conversions": recent_conversions,
     }
     if job.error:
         payload["error"] = job.error
@@ -576,6 +598,29 @@ def _job_queue_position(job: ConversionJob) -> int:
         if active.job_id == job.job_id:
             return index
     return 0
+
+
+def _active_jobs_snapshot() -> list[ConversionJob]:
+    with jobs_lock:
+        active_by_id = {
+            job.job_id: job
+            for job in jobs.values()
+            if job.status in {"queued", "running"}
+        }
+
+    for job in _load_all_disk_jobs():
+        if job.status in {"queued", "running"}:
+            active_by_id.setdefault(job.job_id, job)
+
+    active_jobs = list(active_by_id.values())
+    active_jobs.sort(key=lambda active: (active.created_at, active.job_id))
+    return active_jobs
+
+
+def _queue_message(active_count: int, running_count: int, queued_count: int) -> str:
+    if active_count == 0:
+        return "当前没有排队任务"
+    return f"当前有 {active_count} 个转换任务，{running_count} 个正在处理，{queued_count} 个排队中"
 
 
 def _cleanup_old_jobs() -> None:
@@ -707,8 +752,17 @@ def _record_recent_conversion(job: ConversionJob) -> None:
         return
     _ensure_runtime_dirs()
     payload = _recent_conversion_from_job(job)
+    recent_conversions = [
+        item
+        for item in _recent_conversions_payload()
+        if item.get("completed_at") != payload["completed_at"]
+        or item.get("download_name") != payload["download_name"]
+    ]
+    recent_conversions.append(payload)
+    recent_conversions.sort(key=lambda item: float(item.get("completed_at") or 0), reverse=True)
+    recent_conversions = recent_conversions[:RECENT_CONVERSION_LIMIT]
     temp_file = RECENT_CONVERSION_FILE.with_suffix(".json.tmp")
-    temp_file.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    temp_file.write_text(json.dumps(recent_conversions, ensure_ascii=False), encoding="utf-8")
     os.replace(temp_file, RECENT_CONVERSION_FILE)
 
 
@@ -722,12 +776,26 @@ def _recent_conversion_from_job(job: ConversionJob) -> dict[str, object]:
 
 
 def _recent_conversion_payload() -> dict[str, object] | None:
+    recent_conversions = _recent_conversions_payload()
+    return recent_conversions[0] if recent_conversions else None
+
+
+def _recent_conversions_payload() -> list[dict[str, object]]:
     if not RECENT_CONVERSION_FILE.exists():
-        return None
+        return []
     try:
-        return json.loads(RECENT_CONVERSION_FILE.read_text(encoding="utf-8"))
+        data = json.loads(RECENT_CONVERSION_FILE.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return None
+        return []
+
+    if isinstance(data, dict):
+        data = [data]
+    if not isinstance(data, list):
+        return []
+
+    recent_conversions = [item for item in data if isinstance(item, dict)]
+    recent_conversions.sort(key=lambda item: float(item.get("completed_at") or 0), reverse=True)
+    return recent_conversions[:RECENT_CONVERSION_LIMIT]
 
 
 def _client_region(request: Request) -> str:

@@ -155,6 +155,74 @@ def test_recent_conversion_reports_source_and_duration(sample_ttf_bytes):
 
     assert status_payload["recent_conversion"]["region"] == "IP 8.8.*.*"
     assert status_payload["recent_conversion"]["duration_seconds"] >= 0
+    assert status_payload["recent_conversions"][0]["region"] == "IP 8.8.*.*"
+
+
+def test_recent_conversions_keep_latest_five_sorted():
+    for index in range(6):
+        job = ConversionJob(
+            job_id=f"job-{index}",
+            status="complete",
+            progress=100,
+            message="complete",
+            download_name=f"font-{index}.ttf",
+            output_path=Path(f"font-{index}.ttf"),
+            created_at=1000 + index,
+            updated_at=1000 + index,
+            client_region=f"region-{index}",
+            completed_at=1000 + index,
+            duration_seconds=index + 0.5,
+        )
+        main._record_recent_conversion(job)
+
+    response = client.get("/api/status")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [item["region"] for item in payload["recent_conversions"]] == [
+        "region-5",
+        "region-4",
+        "region-3",
+        "region-2",
+        "region-1",
+    ]
+    assert payload["recent_conversion"]["region"] == "region-5"
+
+
+def test_status_endpoint_reports_active_queue():
+    now = 1000.0
+    running = ConversionJob(
+        job_id="running",
+        status="running",
+        progress=10,
+        message="running",
+        download_name="running.ttf",
+        output_path=Path("running.ttf"),
+        created_at=now,
+        updated_at=now,
+    )
+    queued = ConversionJob(
+        job_id="queued",
+        status="queued",
+        progress=5,
+        message="queued",
+        download_name="queued.ttf",
+        output_path=Path("queued.ttf"),
+        created_at=now + 1,
+        updated_at=now + 1,
+    )
+    with jobs_lock:
+        jobs[running.job_id] = running
+        jobs[queued.job_id] = queued
+
+    response = client.get("/api/status")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["active_jobs"] == 2
+    assert payload["running_jobs"] == 1
+    assert payload["queued_jobs"] == 1
+    assert payload["queue_message"] == "当前有 2 个转换任务，1 个正在处理，1 个排队中"
 
 
 def test_worker_crash_marks_job_failed_without_losing_status(sample_ttf_bytes, monkeypatch):

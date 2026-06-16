@@ -3,50 +3,84 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>TTF 字体转换工具</title>
+    <title>TTF Font Studio</title>
     <link rel="stylesheet" href="/static/styles.css?v=__STATIC_VERSION__" />
   </head>
   <body>
+    <canvas id="studio-background" class="studio-background" aria-hidden="true"></canvas>
+
     <main class="page-shell">
-      <section class="tool-panel" aria-labelledby="page-title">
-        <div class="heading">
-          <p class="eyebrow">Server-side TTF Converter</p>
-          <h1 id="page-title">TTF 字体转换工具</h1>
+      <section class="hero" aria-labelledby="page-title">
+        <div class="hero-copy">
+          <p class="eyebrow">Server-side Font Lab</p>
+          <h1 id="page-title">
+            TTF Font Studio
+            <span class="text-flip-badge" data-text-flip data-flip-words="Upload,Preview,Transform,Download">
+              Upload
+            </span>
+          </h1>
           <p class="summary">
-            上传字体后在服务器内存中处理，支持缩放、Thin、Bold、排版间距和可选字符替换。
+            一个运行在服务端的 TTF 字体处理工具，支持缩放、加粗、变细、排版间距和 A/B 字体字符替换。
           </p>
-          <button id="changelog-button" class="secondary-button" type="button">更新日志</button>
-
-          <div class="preview-panel" aria-label="当前字符效果">
-            <label class="field">
-              <span>预览文本</span>
-              <textarea id="preview-text" rows="3">0123456789 ABCXYZ abcxyz +-*/.,</textarea>
-            </label>
-            <div class="preview-list">
-              <div id="target-preview-card" class="font-preview-card" hidden>
-                <span class="preview-label">当前字体</span>
-                <div id="target-preview-output" class="preview-output">0123456789 ABCXYZ abcxyz +-*/.,</div>
-              </div>
-              <div id="source-preview-card" class="font-preview-card" hidden>
-                <span class="preview-label">A 来源字体</span>
-                <div id="source-preview-output" class="preview-output">0123456789 ABCXYZ abcxyz +-*/.,</div>
-              </div>
-              <div id="result-preview-card" class="font-preview-card" hidden>
-                <span class="preview-label">转换后结果</span>
-                <div id="preview-output" class="preview-output">0123456789 ABCXYZ abcxyz +-*/.,</div>
-              </div>
-            </div>
-          </div>
         </div>
+        <div class="hero-actions">
+          <button id="changelog-button" class="secondary-button" type="button">更新日志</button>
+        </div>
+      </section>
 
-        <form id="converter-form" class="converter-form">
+      <form id="converter-form" class="converter-form">
+        <section class="studio-card upload-card" aria-label="上传和预览">
+          <div class="card-heading">
+            <p class="section-kicker">Upload</p>
+            <h2>上传当前字体</h2>
+          </div>
+
           <div class="upload-group">
             <label class="file-drop">
               <input id="font-file" name="font_file" type="file" accept=".ttf,font/ttf" required />
+              <span class="drop-icon" aria-hidden="true">TTF</span>
               <span class="file-drop-title">选择要处理的字体 .ttf</span>
               <span id="file-meta" class="file-drop-meta">用于缩放、加粗、变细或作为字符替换目标</span>
             </label>
             <button id="clear-font-file" class="clear-file-button" type="button" hidden>删除当前字体</button>
+          </div>
+
+          <label class="field preview-text-field">
+            <span>预览文本</span>
+            <textarea id="preview-text" rows="3">0123456789 ABCXYZ abcxyz +-*/., ♡♡♥...</textarea>
+          </label>
+
+          <div class="preview-list">
+            <div id="target-preview-card" class="font-preview-card" hidden>
+              <div class="preview-card-header">
+                <span class="preview-label">当前字体</span>
+                <span class="preview-state">上传后立即预览</span>
+              </div>
+              <div id="target-preview-output" class="preview-output">0123456789 ABCXYZ abcxyz +-*/.,</div>
+            </div>
+
+            <div id="source-preview-card" class="font-preview-card" hidden>
+              <div class="preview-card-header">
+                <span class="preview-label">A 来源字体</span>
+                <span class="preview-state">替换来源预览</span>
+              </div>
+              <div id="source-preview-output" class="preview-output">0123456789 ABCXYZ abcxyz +-*/.,</div>
+            </div>
+
+            <div id="result-preview-card" class="font-preview-card result-preview-card" hidden>
+              <div class="preview-card-header">
+                <span class="preview-label">转换后结果</span>
+                <span class="preview-state" data-preview-status>等待转换</span>
+              </div>
+              <div id="preview-output" class="preview-output">0123456789 ABCXYZ abcxyz +-*/.,</div>
+            </div>
+          </div>
+        </section>
+
+        <section class="studio-card settings-card" aria-label="转换参数">
+          <div class="card-heading">
+            <p class="section-kicker">Transform</p>
+            <h2>转换参数</h2>
           </div>
 
           <div class="control-grid">
@@ -162,43 +196,56 @@
               </label>
             </div>
           </fieldset>
+        </section>
 
-          <fieldset class="replacement-panel">
-            <legend>可选：字符替换</legend>
-            <div class="upload-group">
-              <label class="file-drop compact-drop">
-                <input id="source-font-file" name="source_font_file" type="file" accept=".ttf,font/ttf" />
-                <span class="file-drop-title">可选：选择 A 来源字体 .ttf</span>
-                <span id="source-file-meta" class="file-drop-meta">上传后可把 A 的指定字符替换到当前字体</span>
-              </label>
-              <button id="clear-source-font-file" class="clear-file-button" type="button" hidden>删除 A 来源字体</button>
-            </div>
-            <div class="replacement-grid">
-              <label class="field">
-                <span>替换范围</span>
-                <select id="replacement-scope" name="replacement_scope">
-                  <option value="digits">仅数字 0-9</option>
-                  <option value="uppercase">仅大写字母 A-Z</option>
-                  <option value="lowercase">仅小写字母 a-z</option>
-                  <option value="letters">大小写字母 A-Z a-z</option>
-                  <option value="digits_letters">数字和字母</option>
-                  <option value="custom">仅自定义字符</option>
-                </select>
-              </label>
+        <section class="studio-card replacement-card" aria-label="字符替换">
+          <div class="card-heading">
+            <p class="section-kicker">Replace</p>
+            <h2>可选：字符替换</h2>
+          </div>
 
-              <label class="field">
-                <span>追加自定义字符</span>
-                <input
-                  id="custom-replacement-chars"
-                  name="custom_replacement_chars"
-                  type="text"
-                  value=""
-                  placeholder="+-*/.,"
-                  autocomplete="off"
-                />
-              </label>
-            </div>
-          </fieldset>
+          <div class="upload-group">
+            <label class="file-drop compact-drop">
+              <input id="source-font-file" name="source_font_file" type="file" accept=".ttf,font/ttf" />
+              <span class="drop-icon" aria-hidden="true">A</span>
+              <span class="file-drop-title">可选：选择 A 来源字体 .ttf</span>
+              <span id="source-file-meta" class="file-drop-meta">上传后可把 A 的指定字符替换到当前字体</span>
+            </label>
+            <button id="clear-source-font-file" class="clear-file-button" type="button" hidden>删除 A 来源字体</button>
+          </div>
+
+          <div class="replacement-grid">
+            <label class="field">
+              <span>替换范围</span>
+              <select id="replacement-scope" name="replacement_scope">
+                <option value="digits">仅数字 0-9</option>
+                <option value="uppercase">仅大写字母 A-Z</option>
+                <option value="lowercase">仅小写字母 a-z</option>
+                <option value="letters">大小写字母 A-Z a-z</option>
+                <option value="digits_letters">数字和字母</option>
+                <option value="custom">仅自定义字符</option>
+              </select>
+            </label>
+
+            <label class="field">
+              <span>追加自定义字符</span>
+              <input
+                id="custom-replacement-chars"
+                name="custom_replacement_chars"
+                type="text"
+                value=""
+                placeholder="+-*/.,♡♥"
+                autocomplete="off"
+              />
+            </label>
+          </div>
+        </section>
+
+        <section class="studio-card progress-card" aria-label="转换和下载">
+          <div class="card-heading">
+            <p class="section-kicker">Download</p>
+            <h2>转换进度</h2>
+          </div>
 
           <div class="progress-panel" aria-label="转换进度">
             <div class="progress-header">
@@ -206,25 +253,38 @@
               <output id="progress-percent" for="progress-bar">0%</output>
             </div>
             <progress id="progress-bar" class="progress-bar" max="100" value="0"></progress>
-            <div class="job-meta" aria-label="任务状态">
-              <span id="queue-info">暂无排队任务</span>
-              <span id="recent-conversion">暂无最近转换记录</span>
-            </div>
           </div>
 
           <div class="actions">
-            <button id="submit-button" type="submit">开始转换</button>
-            <a id="download-link" class="download-link" href="#" download hidden>下载转换后的字体</a>
-            <p id="status" class="status" role="status">等待上传字体</p>
+            <button id="submit-button" class="glow-button" type="submit">
+              <span>开始转换</span>
+              <span class="button-flip" data-text-flip data-flip-words="缩放,加粗,变细,替换,下载">缩放</span>
+            </button>
+            <a id="download-link" class="download-link" href="#" download hidden>
+              下载转换后的字体
+            </a>
           </div>
 
+          <p id="status" class="status" role="status">等待上传字体</p>
           <p id="error-message" class="error-message" role="alert" hidden></p>
-        </form>
-      </section>
+        </section>
+      </form>
 
-      <section class="notice" aria-label="处理说明">
-        <strong>处理说明</strong>
-        <span>文件会上传到服务器进行高兼容转换，但应用不会永久保存上传文件或转换结果。</span>
+      <section class="studio-footer" aria-label="任务状态和处理说明">
+        <div class="notice">
+          <strong>处理说明</strong>
+          <span>文件会上传到服务器进行高兼容转换，但应用不会永久保存上传文件或转换结果。</span>
+        </div>
+        <div class="job-meta" aria-label="最近任务状态">
+          <div class="status-card">
+            <span class="status-card-label">排队状态</span>
+            <span id="queue-info">正在读取排队状态...</span>
+          </div>
+          <div class="status-card recent-status-card">
+            <span class="status-card-label">最近转换</span>
+            <div id="recent-conversion" class="recent-list">正在读取最近转换...</div>
+          </div>
+        </div>
       </section>
 
       <dialog id="changelog-dialog" class="changelog-dialog" aria-labelledby="changelog-title">
@@ -232,6 +292,14 @@
           <div class="dialog-header">
             <h2 id="changelog-title">更新日志</h2>
             <button class="dialog-close" type="submit" aria-label="关闭">×</button>
+          </div>
+          <div class="changelog-entry">
+            <p class="changelog-time">2026-06-16 22:48 +08:00</p>
+            <ul class="changelog-list">
+              <li>重构为 Font Studio / 字体实验室界面，桌面端使用上传预览和转换设置两栏布局，移动端切换为单列布局。</li>
+              <li>新增轻量动态文案和低强度 Studio 背景动画，并支持 prefers-reduced-motion 降低动画强度。</li>
+              <li>页面打开时立即显示当前排队状态和最近 5 条转换记录，转换结果预览改为复用下载 blob，减少重复请求等待。</li>
+            </ul>
           </div>
           <div class="changelog-entry">
             <p class="changelog-time">2026-06-16 22:02 +08:00</p>
