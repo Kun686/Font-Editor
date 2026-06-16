@@ -24,6 +24,31 @@ def test_frontend_previews_uploaded_fonts_before_conversion():
     assert 'source-preview-output' in script
 
 
+def test_frontend_can_clear_uploaded_fonts():
+    script = (BASE_DIR / "static" / "app.js").read_text(encoding="utf-8")
+    markup = (BASE_DIR / "templates" / "index.html").read_text(encoding="utf-8")
+
+    assert 'id="clear-font-file"' in markup
+    assert 'id="clear-source-font-file"' in markup
+    assert "clearTargetFileButton.addEventListener" in script
+    assert "clearSourceFileButton.addEventListener" in script
+    assert 'fileInput.value = ""' in script
+    assert 'sourceFileInput.value = ""' in script
+
+
+def test_frontend_uses_single_weight_strength_input():
+    script = (BASE_DIR / "static" / "app.js").read_text(encoding="utf-8")
+    markup = (BASE_DIR / "templates" / "index.html").read_text(encoding="utf-8")
+
+    assert 'id="effect-units"' in markup
+    assert 'name="effect_units"' in markup
+    assert "effectInput" in script
+    assert "effectXInput" not in script
+    assert "effectYInput" not in script
+    assert "<span>水平效果" not in markup
+    assert "<span>垂直效果" not in markup
+
+
 def test_frontend_uses_indeterminate_progress_during_conversion():
     script = (BASE_DIR / "static" / "app.js").read_text(encoding="utf-8")
 

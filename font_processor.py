@@ -9,7 +9,7 @@ from fontTools.ttLib import TTFont, TTLibError
 
 MIN_SCALE_PERCENT = 10
 MAX_SCALE_PERCENT = 300
-MIN_EFFECT_UNITS = -500
+MIN_EFFECT_UNITS = 0
 MAX_EFFECT_UNITS = 500
 MIN_SPACING_PERCENT = -50
 MAX_SPACING_PERCENT = 50
@@ -32,6 +32,7 @@ def convert_ttf(
     font_bytes: bytes,
     scale_percent: int,
     weight_mode: str = "none",
+    effect_units: float | None = None,
     effect_x_units: float | None = None,
     effect_y_units: float | None = None,
     spacing_left_percent: float = 0,
@@ -46,6 +47,7 @@ def convert_ttf(
         font,
         scale_percent=scale_percent,
         weight_mode=weight_mode,
+        effect_units=effect_units,
         effect_x_units=effect_x_units,
         effect_y_units=effect_y_units,
         spacing_left_percent=spacing_left_percent,
@@ -62,6 +64,7 @@ def process_ttf(
     font_bytes: bytes,
     scale_percent: int,
     weight_mode: str = "none",
+    effect_units: float | None = None,
     effect_x_units: float | None = None,
     effect_y_units: float | None = None,
     spacing_left_percent: float = 0,
@@ -80,6 +83,7 @@ def process_ttf(
         font,
         scale_percent=scale_percent,
         weight_mode=weight_mode,
+        effect_units=effect_units,
         effect_x_units=effect_x_units,
         effect_y_units=effect_y_units,
         spacing_left_percent=spacing_left_percent,
@@ -96,6 +100,7 @@ def _apply_ttf_conversion(
     font: TTFont,
     scale_percent: int,
     weight_mode: str = "none",
+    effect_units: float | None = None,
     effect_x_units: float | None = None,
     effect_y_units: float | None = None,
     spacing_left_percent: float = 0,
@@ -105,8 +110,13 @@ def _apply_ttf_conversion(
     effect_x_percent: float | None = None,
     effect_y_percent: float | None = None,
 ) -> None:
-    effect_x_units = _resolve_effect_units(effect_x_units, effect_x_percent)
-    effect_y_units = _resolve_effect_units(effect_y_units, effect_y_percent)
+    effect_x_units, effect_y_units = _resolve_effect_unit_pair(
+        effect_units,
+        effect_x_units,
+        effect_y_units,
+        effect_x_percent,
+        effect_y_percent,
+    )
 
     if scale_percent < MIN_SCALE_PERCENT or scale_percent > MAX_SCALE_PERCENT:
         raise FontConversionError("缩放比例必须在 10% 到 300% 之间")
@@ -416,7 +426,22 @@ def _map_character_to_glyph(font: TTFont, codepoint: int, glyph_name: str) -> No
         raise FontConversionError("目标字体缺少可写入的 Unicode cmap 表")
 
 
-def _resolve_effect_units(effect_units: float | None, legacy_effect_value: float | None) -> float:
+def _resolve_effect_unit_pair(
+    effect_units: float | None,
+    effect_x_units: float | None,
+    effect_y_units: float | None,
+    legacy_effect_x: float | None,
+    legacy_effect_y: float | None,
+) -> tuple[float, float]:
+    if effect_units is not None:
+        return effect_units, effect_units
+    return (
+        _resolve_legacy_effect_units(effect_x_units, legacy_effect_x),
+        _resolve_legacy_effect_units(effect_y_units, legacy_effect_y),
+    )
+
+
+def _resolve_legacy_effect_units(effect_units: float | None, legacy_effect_value: float | None) -> float:
     if effect_units is not None:
         return effect_units
     if legacy_effect_value is not None:
@@ -426,7 +451,7 @@ def _resolve_effect_units(effect_units: float | None, legacy_effect_value: float
 
 def _validate_effect_value(value: float) -> None:
     if value < MIN_EFFECT_UNITS or value > MAX_EFFECT_UNITS:
-        raise FontConversionError("效果数值必须在 -500 到 500 字体单位之间")
+        raise FontConversionError("效果数值必须在 0 到 500 字体单位之间")
 
 
 def _validate_spacing_value(value: float) -> None:

@@ -15,8 +15,7 @@ def test_convert_endpoint_returns_ttf_download(sample_ttf_bytes):
         data={
             "scale_percent": "125",
             "weight_mode": "bold",
-            "effect_x_units": "5",
-            "effect_y_units": "0",
+            "effect_units": "5",
         },
         files={"font_file": ("demo.ttf", sample_ttf_bytes, "font/ttf")},
     )
@@ -24,9 +23,9 @@ def test_convert_endpoint_returns_ttf_download(sample_ttf_bytes):
     assert response.status_code == 200
     assert response.headers["content-type"] == "font/ttf"
     assert "attachment" in response.headers["content-disposition"]
-    assert "demo-125pct-bold-x5-y0.ttf" in response.headers["content-disposition"]
+    assert "demo-125pct-bold-u5.ttf" in response.headers["content-disposition"]
     font = TTFont(BytesIO(response.content))
-    assert font["hmtx"].metrics["A"][0] > 500
+    assert font["hmtx"].metrics["A"][0] > 625
 
 
 def test_convert_endpoint_replaces_characters_from_source_font(build_ttf_bytes):
@@ -93,11 +92,19 @@ def test_homepage_includes_spacing_controls_and_progress_bar():
     assert "2026-06-16 16:10 +08:00" in response.text
     assert "上传字体后立即预览当前字符效果" in response.text
     assert "修复进度条停在 95%" in response.text
+    assert "2026-06-16 16:36 +08:00" in response.text
+    assert "字重强度改为单一字体单位输入" in response.text
     assert "选择要处理的字体 .ttf" in response.text
     assert "选择 B 目标字体" not in response.text
+    assert "<span>水平效果" not in response.text
+    assert "<span>垂直效果" not in response.text
     assert "可选：字符替换" in response.text
     assert "可选：选择 A 来源字体 .ttf" in response.text
+    assert response.text.index("排版间距 (%)") < response.text.index("可选：字符替换")
     assert 'id="download-link"' in response.text
+    assert 'id="clear-font-file"' in response.text
+    assert 'id="clear-source-font-file"' in response.text
+    assert 'id="effect-units"' in response.text
     assert 'id="spacing-left"' in response.text
     assert 'id="spacing-right"' in response.text
     assert 'id="spacing-top"' in response.text
@@ -150,8 +157,7 @@ def test_convert_endpoint_rejects_extreme_effect_value(sample_ttf_bytes):
         data={
             "scale_percent": "100",
             "weight_mode": "thin",
-            "effect_x_units": "501",
-            "effect_y_units": "0",
+            "effect_units": "501",
         },
         files={"font_file": ("demo.ttf", sample_ttf_bytes, "font/ttf")},
     )

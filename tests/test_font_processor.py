@@ -147,6 +147,20 @@ def test_bold_effect_expands_horizontal_and_vertical_bounds(sample_ttf_bytes):
         sample_ttf_bytes,
         scale_percent=100,
         weight_mode="bold",
+        effect_units=5,
+    )
+    font = _load_font(converted)
+
+    assert "A" in font.getGlyphOrder()
+    assert _glyph_bounds(font) == (45, -5, 455, 505)
+    assert font["hmtx"].metrics["A"][0] == 510
+
+
+def test_legacy_bold_effect_expands_horizontal_and_vertical_bounds(sample_ttf_bytes):
+    converted = convert_ttf(
+        sample_ttf_bytes,
+        scale_percent=100,
+        weight_mode="bold",
         effect_x_units=5,
         effect_y_units=7,
     )
@@ -195,14 +209,13 @@ def test_thin_effect_contracts_horizontal_and_vertical_bounds(sample_ttf_bytes):
         sample_ttf_bytes,
         scale_percent=100,
         weight_mode="thin",
-        effect_x_units=3,
-        effect_y_units=4,
+        effect_units=4,
     )
     font = _load_font(converted)
 
     assert "A" in font.getGlyphOrder()
-    assert _glyph_bounds(font) == (53, 4, 447, 496)
-    assert font["hmtx"].metrics["A"][0] == 494
+    assert _glyph_bounds(font) == (54, 4, 446, 496)
+    assert font["hmtx"].metrics["A"][0] == 492
 
 
 def test_replacement_characters_builds_presets_with_custom_symbols():
@@ -274,7 +287,7 @@ def test_rejects_extreme_effect_values(sample_ttf_bytes, effect):
             sample_ttf_bytes,
             scale_percent=100,
             weight_mode="bold",
-            effect_x_units=effect,
+            effect_units=effect,
         )
 
 

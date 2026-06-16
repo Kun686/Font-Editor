@@ -30,6 +30,7 @@ async def convert_font(
     source_font_file: UploadFile | None = File(None),
     scale_percent: int = Form(100),
     weight_mode: str = Form("none"),
+    effect_units: float | None = Form(None),
     effect_x_units: float | None = Form(None),
     effect_y_units: float | None = Form(None),
     effect_x_percent: float | None = Form(None),
@@ -60,8 +61,13 @@ async def convert_font(
         if len(source_font_bytes) > MAX_UPLOAD_BYTES:
             raise HTTPException(status_code=413, detail="来源字体文件不能超过 50MB")
 
-    effect_x = _resolve_effect_form_value(effect_x_units, effect_x_percent)
-    effect_y = _resolve_effect_form_value(effect_y_units, effect_y_percent)
+    effect_x, effect_y = _resolve_effect_form_values(
+        effect_units,
+        effect_x_units,
+        effect_y_units,
+        effect_x_percent,
+        effect_y_percent,
+    )
     try:
         replacement_chars = (
             replacement_characters(replacement_scope, custom_replacement_chars)
@@ -72,6 +78,7 @@ async def convert_font(
             font_bytes,
             scale_percent=scale_percent,
             weight_mode=weight_mode,
+            effect_units=effect_units,
             effect_x_units=effect_x,
             effect_y_units=effect_y,
             spacing_left_percent=spacing_left_percent,
@@ -138,6 +145,8 @@ def _download_name(
 def _effect_label(weight_mode: str, effect_x_units: float, effect_y_units: float) -> str:
     if weight_mode == "none":
         return "none"
+    if effect_x_units == effect_y_units:
+        return f"{weight_mode}-u{_format_effect_number(effect_x_units)}"
     return (
         f"{weight_mode}-"
         f"x{_format_effect_number(effect_x_units)}-"
@@ -194,7 +203,22 @@ async def _read_upload_bytes(upload: UploadFile) -> bytes:
         await upload.close()
 
 
-def _resolve_effect_form_value(effect_units: float | None, legacy_effect_value: float | None) -> float:
+def _resolve_effect_form_values(
+    effect_units: float | None,
+    effect_x_units: float | None,
+    effect_y_units: float | None,
+    legacy_effect_x: float | None,
+    legacy_effect_y: float | None,
+) -> tuple[float, float]:
+    if effect_units is not None:
+        return effect_units, effect_units
+    return (
+        _resolve_legacy_effect_form_value(effect_x_units, legacy_effect_x),
+        _resolve_legacy_effect_form_value(effect_y_units, legacy_effect_y),
+    )
+
+
+def _resolve_legacy_effect_form_value(effect_units: float | None, legacy_effect_value: float | None) -> float:
     if effect_units is not None:
         return effect_units
     if legacy_effect_value is not None:

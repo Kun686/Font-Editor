@@ -105,6 +105,11 @@ h1 {
   gap: 18px;
 }
 
+.upload-group {
+  display: grid;
+  gap: 10px;
+}
+
 .file-drop {
   display: grid;
   gap: 8px;
@@ -153,8 +158,31 @@ h1 {
   padding: 18px;
 }
 
+.clear-file-button {
+  width: max-content;
+  min-height: 36px;
+  justify-self: end;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  background: #fff;
+  font-size: 14px;
+}
+
+.clear-file-button:hover {
+  border-color: var(--danger);
+  color: #fff;
+  background: var(--danger);
+}
+
+.clear-file-button[hidden] {
+  display: none;
+}
+
 .control-grid,
-.effect-grid {
+.effect-grid,
+.weight-effect-grid {
   display: grid;
   grid-template-columns: 150px 1fr;
   gap: 16px;
@@ -163,6 +191,10 @@ h1 {
 
 .effect-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.weight-effect-grid {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .spacing-panel {
@@ -502,7 +534,7 @@ button:disabled {
 
 .changelog-dialog form {
   display: grid;
-  gap: 14px;
+  gap: 16px;
   margin: 0;
   padding: 22px;
 }
@@ -542,6 +574,11 @@ button:disabled {
   font-size: 14px;
 }
 
+.changelog-entry {
+  display: grid;
+  gap: 8px;
+}
+
 .changelog-list {
   margin: 0;
   padding-left: 20px;
@@ -573,6 +610,7 @@ button:disabled {
 
   .control-grid,
   .effect-grid,
+  .weight-effect-grid,
   .spacing-grid,
   .replacement-grid,
   .actions {

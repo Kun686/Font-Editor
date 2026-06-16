@@ -40,11 +40,14 @@
         </div>
 
         <form id="converter-form" class="converter-form">
-          <label class="file-drop">
-            <input id="font-file" name="font_file" type="file" accept=".ttf,font/ttf" required />
-            <span class="file-drop-title">选择要处理的字体 .ttf</span>
-            <span id="file-meta" class="file-drop-meta">用于缩放、加粗、变细或作为字符替换目标</span>
-          </label>
+          <div class="upload-group">
+            <label class="file-drop">
+              <input id="font-file" name="font_file" type="file" accept=".ttf,font/ttf" required />
+              <span class="file-drop-title">选择要处理的字体 .ttf</span>
+              <span id="file-meta" class="file-drop-meta">用于缩放、加粗、变细或作为字符替换目标</span>
+            </label>
+            <button id="clear-font-file" class="clear-file-button" type="button" hidden>删除当前字体</button>
+          </div>
 
           <div class="control-grid">
             <label class="field">
@@ -83,69 +86,21 @@
             </label>
           </fieldset>
 
-          <div class="effect-grid">
+          <div class="weight-effect-grid">
             <label class="field">
-              <span>水平效果 (字体单位)</span>
+              <span>字重强度 (字体单位)</span>
               <input
-                id="effect-x"
-                name="effect_x_units"
+                id="effect-units"
+                name="effect_units"
                 type="number"
-                min="-500"
-                max="500"
-                step="1"
-                value="0"
-                inputmode="decimal"
-              />
-            </label>
-
-            <label class="field">
-              <span>垂直效果 (字体单位)</span>
-              <input
-                id="effect-y"
-                name="effect_y_units"
-                type="number"
-                min="-500"
-                max="500"
+                min="0"
+                max="100"
                 step="1"
                 value="0"
                 inputmode="decimal"
               />
             </label>
           </div>
-
-          <fieldset class="replacement-panel">
-            <legend>可选：字符替换</legend>
-            <label class="file-drop compact-drop">
-              <input id="source-font-file" name="source_font_file" type="file" accept=".ttf,font/ttf" />
-              <span class="file-drop-title">可选：选择 A 来源字体 .ttf</span>
-              <span id="source-file-meta" class="file-drop-meta">上传后可把 A 的指定字符替换到当前字体</span>
-            </label>
-            <div class="replacement-grid">
-              <label class="field">
-                <span>替换范围</span>
-                <select id="replacement-scope" name="replacement_scope">
-                  <option value="digits">仅数字 0-9</option>
-                  <option value="uppercase">仅大写字母 A-Z</option>
-                  <option value="lowercase">仅小写字母 a-z</option>
-                  <option value="letters">大小写字母 A-Z a-z</option>
-                  <option value="digits_letters">数字和字母</option>
-                  <option value="custom">仅自定义字符</option>
-                </select>
-              </label>
-
-              <label class="field">
-                <span>追加自定义字符</span>
-                <input
-                  id="custom-replacement-chars"
-                  name="custom_replacement_chars"
-                  type="text"
-                  value=""
-                  placeholder="+-*/.,"
-                  autocomplete="off"
-                />
-              </label>
-            </div>
-          </fieldset>
 
           <fieldset class="spacing-panel">
             <legend>排版间距 (%)</legend>
@@ -208,6 +163,43 @@
             </div>
           </fieldset>
 
+          <fieldset class="replacement-panel">
+            <legend>可选：字符替换</legend>
+            <div class="upload-group">
+              <label class="file-drop compact-drop">
+                <input id="source-font-file" name="source_font_file" type="file" accept=".ttf,font/ttf" />
+                <span class="file-drop-title">可选：选择 A 来源字体 .ttf</span>
+                <span id="source-file-meta" class="file-drop-meta">上传后可把 A 的指定字符替换到当前字体</span>
+              </label>
+              <button id="clear-source-font-file" class="clear-file-button" type="button" hidden>删除 A 来源字体</button>
+            </div>
+            <div class="replacement-grid">
+              <label class="field">
+                <span>替换范围</span>
+                <select id="replacement-scope" name="replacement_scope">
+                  <option value="digits">仅数字 0-9</option>
+                  <option value="uppercase">仅大写字母 A-Z</option>
+                  <option value="lowercase">仅小写字母 a-z</option>
+                  <option value="letters">大小写字母 A-Z a-z</option>
+                  <option value="digits_letters">数字和字母</option>
+                  <option value="custom">仅自定义字符</option>
+                </select>
+              </label>
+
+              <label class="field">
+                <span>追加自定义字符</span>
+                <input
+                  id="custom-replacement-chars"
+                  name="custom_replacement_chars"
+                  type="text"
+                  value=""
+                  placeholder="+-*/.,"
+                  autocomplete="off"
+                />
+              </label>
+            </div>
+          </fieldset>
+
           <div class="progress-panel" aria-label="转换进度">
             <div class="progress-header">
               <span id="progress-label">等待开始</span>
@@ -237,16 +229,26 @@
             <h2 id="changelog-title">更新日志</h2>
             <button class="dialog-close" type="submit" aria-label="关闭">×</button>
           </div>
-          <p class="changelog-time">2026-06-16 16:10 +08:00</p>
-          <ul class="changelog-list">
-            <li>主流程改为只需上传一个要处理的字体，A 来源字体移入可选字符替换模块。</li>
-            <li>上传字体后立即预览当前字符效果；同时上传 A 和当前字体时分别显示两套预览。</li>
-            <li>转换完成后显示最终替换、缩放、加粗和间距处理后的预览。</li>
-            <li>修复 A → 当前字体字符替换未提交、旧下载结果未清理的问题。</li>
-            <li>修复进度条停在 95% 的显示问题，转换阶段改为不定进度。</li>
-            <li>加粗和变细改为按字体单位控制，减少尖角字形被过度拉伸的问题。</li>
-            <li>合并替换和转换流程，减少大字体的重复保存和读取时间。</li>
-          </ul>
+          <div class="changelog-entry">
+            <p class="changelog-time">2026-06-16 16:36 +08:00</p>
+            <ul class="changelog-list">
+              <li>字重强度改为单一字体单位输入，Bold 和 Thin 不再拆分水平效果、垂直效果。</li>
+              <li>排版间距移动到可选字符替换上方，常用缩放、字重、间距流程更靠前。</li>
+              <li>目标字体和 A 来源字体都增加删除按钮，可单独清除上传文件和对应预览。</li>
+            </ul>
+          </div>
+          <div class="changelog-entry">
+            <p class="changelog-time">2026-06-16 16:10 +08:00</p>
+            <ul class="changelog-list">
+              <li>主流程改为只需上传一个要处理的字体，A 来源字体移入可选字符替换模块。</li>
+              <li>上传字体后立即预览当前字符效果；同时上传 A 和当前字体时分别显示两套预览。</li>
+              <li>转换完成后显示最终替换、缩放、加粗和间距处理后的预览。</li>
+              <li>修复 A → 当前字体字符替换未提交、旧下载结果未清理的问题。</li>
+              <li>修复进度条停在 95% 的显示问题，转换阶段改为不定进度。</li>
+              <li>加粗和变细改为按字体单位控制，减少尖角字形被过度拉伸的问题。</li>
+              <li>合并替换和转换流程，减少大字体的重复保存和读取时间。</li>
+            </ul>
+          </div>
         </form>
       </dialog>
     </main>

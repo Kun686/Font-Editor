@@ -3,10 +3,11 @@ const fileInput = document.querySelector("#font-file");
 const fileMeta = document.querySelector("#file-meta");
 const sourceFileInput = document.querySelector("#source-font-file");
 const sourceFileMeta = document.querySelector("#source-file-meta");
+const clearTargetFileButton = document.querySelector("#clear-font-file");
+const clearSourceFileButton = document.querySelector("#clear-source-font-file");
 const scaleInput = document.querySelector("#scale-percent");
 const scaleRange = document.querySelector("#scale-range");
-const effectXInput = document.querySelector("#effect-x");
-const effectYInput = document.querySelector("#effect-y");
+const effectInput = document.querySelector("#effect-units");
 const spacingInputs = [
   document.querySelector("#spacing-left"),
   document.querySelector("#spacing-right"),
@@ -44,7 +45,7 @@ const previewFileUrls = {
   target: null,
   source: null,
 };
-const CHANGELOG_STORAGE_KEY = "ttf-tool-changelog-2026-06-16-1610";
+const CHANGELOG_STORAGE_KEY = "ttf-tool-changelog-2026-06-16-1636";
 let activeDownloadUrl = null;
 let progressTimer = null;
 
@@ -74,14 +75,25 @@ fileInput.addEventListener("change", () => {
   if (!file) {
     clearFilePreview("target");
     fileMeta.textContent = "用于缩放、加粗、变细或作为字符替换目标";
+    clearTargetFileButton.hidden = true;
     return;
   }
 
   const sizeMb = file.size / 1024 / 1024;
   fileMeta.textContent = `${file.name} · ${sizeMb.toFixed(2)}MB`;
+  clearTargetFileButton.hidden = false;
   applyFilePreview("target", file);
   statusText.textContent = "等待转换";
   setProgress(0, "等待开始");
+});
+
+clearTargetFileButton.addEventListener("click", () => {
+  fileInput.value = "";
+  clearDownload();
+  clearFilePreview("target");
+  clearTargetFileButton.hidden = true;
+  fileMeta.textContent = "用于缩放、加粗、变细或作为字符替换目标";
+  statusText.textContent = "等待上传字体";
 });
 
 sourceFileInput.addEventListener("change", () => {
@@ -90,12 +102,22 @@ sourceFileInput.addEventListener("change", () => {
   if (!file) {
     clearFilePreview("source");
     sourceFileMeta.textContent = "上传后可把 A 的指定字符替换到当前字体";
+    clearSourceFileButton.hidden = true;
     return;
   }
 
   const sizeMb = file.size / 1024 / 1024;
   sourceFileMeta.textContent = `${file.name} · ${sizeMb.toFixed(2)}MB`;
+  clearSourceFileButton.hidden = false;
   applyFilePreview("source", file);
+});
+
+clearSourceFileButton.addEventListener("click", () => {
+  sourceFileInput.value = "";
+  clearDownload();
+  clearFilePreview("source");
+  clearSourceFileButton.hidden = true;
+  sourceFileMeta.textContent = "上传后可把 A 的指定字符替换到当前字体";
 });
 
 previewText.addEventListener("input", () => {
@@ -137,10 +159,9 @@ form.addEventListener("submit", async (event) => {
     return;
   }
 
-  const effectX = Number(effectXInput.value);
-  const effectY = Number(effectYInput.value);
-  if (!isValidEffect(effectX) || !isValidEffect(effectY)) {
-    showError("水平和垂直效果数值必须在 -500 到 500 字体单位之间");
+  const effect = Number(effectInput.value);
+  if (!isValidEffect(effect)) {
+    showError("字重强度必须在 0 到 100 字体单位之间");
     return;
   }
 
@@ -185,7 +206,7 @@ function clampNumber(value, min, max, fallback) {
 }
 
 function isValidEffect(value) {
-  return Number.isFinite(value) && value >= -500 && value <= 500;
+  return Number.isFinite(value) && value >= 0 && value <= 100;
 }
 
 function isValidSpacing(value) {
