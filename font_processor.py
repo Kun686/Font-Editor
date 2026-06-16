@@ -10,6 +10,8 @@ MIN_SCALE_PERCENT = 10
 MAX_SCALE_PERCENT = 300
 MIN_EFFECT_PERCENT = -50
 MAX_EFFECT_PERCENT = 50
+MIN_SPACING_PERCENT = -50
+MAX_SPACING_PERCENT = 50
 WEIGHT_MODES = {"none", "thin", "bold"}
 
 
@@ -23,6 +25,10 @@ def convert_ttf(
     weight_mode: str = "none",
     effect_x_percent: float = 0,
     effect_y_percent: float = 0,
+    spacing_left_percent: float = 0,
+    spacing_right_percent: float = 0,
+    spacing_top_percent: float = 0,
+    spacing_bottom_percent: float = 0,
 ) -> bytes:
     if not font_bytes:
         raise FontConversionError("上传的字体文件为空")
@@ -32,6 +38,10 @@ def convert_ttf(
         raise FontConversionError("字形效果必须是 none、thin 或 bold")
     _validate_effect_value(effect_x_percent)
     _validate_effect_value(effect_y_percent)
+    _validate_spacing_value(spacing_left_percent)
+    _validate_spacing_value(spacing_right_percent)
+    _validate_spacing_value(spacing_top_percent)
+    _validate_spacing_value(spacing_bottom_percent)
 
     try:
         font = TTFont(BytesIO(font_bytes), recalcBBoxes=True, recalcTimestamp=False)
@@ -56,6 +66,14 @@ def convert_ttf(
             effect_x=_effect_to_units(font, effect_x_percent),
             effect_y=_effect_to_units(font, effect_y_percent),
         )
+
+    _apply_layout_spacing(
+        font,
+        left=_spacing_to_units(font, spacing_left_percent),
+        right=_spacing_to_units(font, spacing_right_percent),
+        top=_spacing_to_units(font, spacing_top_percent),
+        bottom=_spacing_to_units(font, spacing_bottom_percent),
+    )
 
     output = BytesIO()
     try:
@@ -210,7 +228,16 @@ def _validate_effect_value(value: float) -> None:
         raise FontConversionError("效果数值必须在 -50 到 50 之间")
 
 
+def _validate_spacing_value(value: float) -> None:
+    if value < MIN_SPACING_PERCENT or value > MAX_SPACING_PERCENT:
+        raise FontConversionError("间距数值必须在 -50 到 50 之间")
+
+
 def _effect_to_units(font: TTFont, percent: float) -> int:
+    return _round(font["head"].unitsPerEm * percent / 100)
+
+
+def _spacing_to_units(font: TTFont, percent: float) -> int:
     return _round(font["head"].unitsPerEm * percent / 100)
 
 
@@ -238,6 +265,81 @@ def _apply_weight_effect(font: TTFont, mode: str, effect_x: int, effect_y: int) 
 
     _adjust_horizontal_metrics(font, delta_x)
     _mark_weight_style(font, mode)
+
+
+def _apply_layout_spacing(font: TTFont, left: int, right: int, top: int, bottom: int) -> None:
+    if left == 0 and right == 0 and top == 0 and bottom == 0:
+        return
+
+    if left != 0 or right != 0:
+        _adjust_layout_horizontal_spacing(font, left, right)
+    if top != 0 or bottom != 0:
+        _adjust_layout_vertical_spacing(font, top, bottom)
+
+
+def _adjust_layout_horizontal_spacing(font: TTFont, left: int, right: int) -> None:
+    advance_delta = left + right
+    hmtx = font["hmtx"]
+    hmtx.metrics = {
+        name: (
+            _clamp_unsigned_16(advance + advance_delta),
+            _clamp_signed_16(lsb + left),
+        )
+        for name, (advance, lsb) in hmtx.metrics.items()
+    }
+
+    if "hhea" in font:
+        hhea = font["hhea"]
+        _add_table_field(hhea, "advanceWidthMax", advance_delta, unsigned=True)
+        _add_table_field(hhea, "minLeftSideBearing", left)
+        _add_table_field(hhea, "minRightSideBearing", right)
+        _add_table_field(hhea, "xMaxExtent", left)
+
+    if "OS/2" in font:
+        _add_table_field(font["OS/2"], "xAvgCharWidth", advance_delta)
+
+
+def _adjust_layout_vertical_spacing(font: TTFont, top: int, bottom: int) -> None:
+    for table_tag in ("hhea", "vhea"):
+        if table_tag not in font:
+            continue
+        table = font[table_tag]
+        _add_table_field(table, "ascent", top)
+        _add_table_field(table, "descent", -bottom)
+
+    if "OS/2" in font:
+        os2 = font["OS/2"]
+        _add_table_field(os2, "sTypoAscender", top)
+        _add_table_field(os2, "sTypoDescender", -bottom)
+        _add_table_field(os2, "usWinAscent", top, unsigned=True)
+        _add_table_field(os2, "usWinDescent", bottom, unsigned=True)
+
+    if "vmtx" in font:
+        advance_delta = top + bottom
+        vmtx = font["vmtx"]
+        vmtx.metrics = {
+            name: (
+                _clamp_unsigned_16(advance + advance_delta),
+                _clamp_signed_16(tsb + top),
+            )
+            for name, (advance, tsb) in vmtx.metrics.items()
+        }
+
+
+def _add_table_field(table, field: str, delta: int, unsigned: bool = False) -> None:
+    if not hasattr(table, field):
+        return
+
+    value = getattr(table, field)
+    if value is None:
+        return
+
+    adjusted = _round(value + delta)
+    if unsigned:
+        adjusted = _clamp_unsigned_16(adjusted)
+    else:
+        adjusted = _clamp_signed_16(adjusted)
+    setattr(table, field, adjusted)
 
 
 def _offset_glyph_contours(glyph, delta_x: int, delta_y: int) -> None:

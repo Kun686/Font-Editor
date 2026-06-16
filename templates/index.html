@@ -91,6 +91,75 @@
             </label>
           </div>
 
+          <fieldset class="spacing-panel">
+            <legend>排版间距 (%)</legend>
+            <div class="spacing-grid">
+              <label class="field">
+                <span>左间距</span>
+                <input
+                  id="spacing-left"
+                  name="spacing_left_percent"
+                  type="number"
+                  min="-50"
+                  max="50"
+                  step="0.1"
+                  value="0"
+                  inputmode="decimal"
+                />
+              </label>
+
+              <label class="field">
+                <span>右间距</span>
+                <input
+                  id="spacing-right"
+                  name="spacing_right_percent"
+                  type="number"
+                  min="-50"
+                  max="50"
+                  step="0.1"
+                  value="0"
+                  inputmode="decimal"
+                />
+              </label>
+
+              <label class="field">
+                <span>上间距</span>
+                <input
+                  id="spacing-top"
+                  name="spacing_top_percent"
+                  type="number"
+                  min="-50"
+                  max="50"
+                  step="0.1"
+                  value="0"
+                  inputmode="decimal"
+                />
+              </label>
+
+              <label class="field">
+                <span>下间距</span>
+                <input
+                  id="spacing-bottom"
+                  name="spacing_bottom_percent"
+                  type="number"
+                  min="-50"
+                  max="50"
+                  step="0.1"
+                  value="0"
+                  inputmode="decimal"
+                />
+              </label>
+            </div>
+          </fieldset>
+
+          <div class="progress-panel" aria-label="转换进度">
+            <div class="progress-header">
+              <span id="progress-label">等待开始</span>
+              <output id="progress-percent" for="progress-bar">0%</output>
+            </div>
+            <progress id="progress-bar" class="progress-bar" max="100" value="0"></progress>
+          </div>
+
           <div class="actions">
             <button id="submit-button" type="submit">开始转换</button>
             <a id="download-link" class="download-link" href="#" download hidden>下载转换后的字体</a>

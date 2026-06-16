@@ -31,6 +31,10 @@ async def convert_font(
     weight_mode: str = Form("none"),
     effect_x_percent: float = Form(0),
     effect_y_percent: float = Form(0),
+    spacing_left_percent: float = Form(0),
+    spacing_right_percent: float = Form(0),
+    spacing_top_percent: float = Form(0),
+    spacing_bottom_percent: float = Form(0),
 ) -> Response:
     filename = font_file.filename or ""
     if not filename.lower().endswith(".ttf"):
@@ -51,6 +55,10 @@ async def convert_font(
             weight_mode=weight_mode,
             effect_x_percent=effect_x_percent,
             effect_y_percent=effect_y_percent,
+            spacing_left_percent=spacing_left_percent,
+            spacing_right_percent=spacing_right_percent,
+            spacing_top_percent=spacing_top_percent,
+            spacing_bottom_percent=spacing_bottom_percent,
         )
     except FontConversionError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -61,6 +69,10 @@ async def convert_font(
         weight_mode=weight_mode,
         effect_x_percent=effect_x_percent,
         effect_y_percent=effect_y_percent,
+        spacing_left_percent=spacing_left_percent,
+        spacing_right_percent=spacing_right_percent,
+        spacing_top_percent=spacing_top_percent,
+        spacing_bottom_percent=spacing_bottom_percent,
     )
     return Response(
         content=converted,
@@ -81,12 +93,22 @@ def _download_name(
     weight_mode: str,
     effect_x_percent: float,
     effect_y_percent: float,
+    spacing_left_percent: float,
+    spacing_right_percent: float,
+    spacing_top_percent: float,
+    spacing_bottom_percent: float,
 ) -> str:
     normalized_source = source_filename.replace("\\", "/")
     source_stem = Path(normalized_source).stem.strip() or "font"
     safe_stem = _safe_file_part(source_stem) or "font"
     effect = _effect_label(weight_mode, effect_x_percent, effect_y_percent)
-    return f"{safe_stem}-{scale_percent}pct-{effect}.ttf"
+    spacing = _spacing_label(
+        spacing_left_percent,
+        spacing_right_percent,
+        spacing_top_percent,
+        spacing_bottom_percent,
+    )
+    return f"{safe_stem}-{scale_percent}pct-{effect}{spacing}.ttf"
 
 
 def _effect_label(weight_mode: str, effect_x_percent: float, effect_y_percent: float) -> str:
@@ -96,6 +118,31 @@ def _effect_label(weight_mode: str, effect_x_percent: float, effect_y_percent: f
         f"{weight_mode}-"
         f"x{_format_effect_number(effect_x_percent)}-"
         f"y{_format_effect_number(effect_y_percent)}"
+    )
+
+
+def _spacing_label(
+    spacing_left_percent: float,
+    spacing_right_percent: float,
+    spacing_top_percent: float,
+    spacing_bottom_percent: float,
+) -> str:
+    if not any(
+        [
+            spacing_left_percent,
+            spacing_right_percent,
+            spacing_top_percent,
+            spacing_bottom_percent,
+        ]
+    ):
+        return ""
+
+    return (
+        "-space-"
+        f"l{_format_effect_number(spacing_left_percent)}-"
+        f"r{_format_effect_number(spacing_right_percent)}-"
+        f"t{_format_effect_number(spacing_top_percent)}-"
+        f"b{_format_effect_number(spacing_bottom_percent)}"
     )
 
 

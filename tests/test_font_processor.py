@@ -95,6 +95,26 @@ def test_scale_updates_supporting_font_metrics(sample_ttf_bytes):
     assert font["post"].underlineThickness == 60
 
 
+def test_layout_spacing_adjusts_horizontal_and_vertical_metrics(sample_ttf_bytes):
+    converted = convert_ttf(
+        sample_ttf_bytes,
+        scale_percent=100,
+        spacing_left_percent=2,
+        spacing_right_percent=3,
+        spacing_top_percent=4,
+        spacing_bottom_percent=5,
+    )
+    font = _load_font(converted)
+
+    assert font["hmtx"].metrics["A"] == (550, 70)
+    assert font["hhea"].ascent == 840
+    assert font["hhea"].descent == -250
+    assert font["OS/2"].sTypoAscender == 840
+    assert font["OS/2"].sTypoDescender == -250
+    assert font["OS/2"].usWinAscent == 840
+    assert font["OS/2"].usWinDescent == 250
+
+
 def test_bold_effect_expands_horizontal_and_vertical_bounds(sample_ttf_bytes):
     converted = convert_ttf(
         sample_ttf_bytes,
@@ -161,6 +181,16 @@ def test_rejects_extreme_effect_values(sample_ttf_bytes, effect):
             scale_percent=100,
             weight_mode="bold",
             effect_x_percent=effect,
+        )
+
+
+@pytest.mark.parametrize("spacing", [-51, 51])
+def test_rejects_extreme_spacing_values(sample_ttf_bytes, spacing):
+    with pytest.raises(FontConversionError):
+        convert_ttf(
+            sample_ttf_bytes,
+            scale_percent=100,
+            spacing_left_percent=spacing,
         )
 
 

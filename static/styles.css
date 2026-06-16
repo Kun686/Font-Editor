@@ -144,6 +144,27 @@ h1 {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.spacing-panel {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.spacing-panel legend {
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.spacing-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
 .field,
 .range-field {
   display: grid;
@@ -233,6 +254,50 @@ h1 {
   border-color: var(--accent);
   color: var(--accent-dark);
   background: var(--accent-soft);
+}
+
+.progress-panel {
+  display: grid;
+  gap: 8px;
+}
+
+.progress-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.progress-header output {
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+.progress-bar {
+  width: 100%;
+  height: 12px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 999px;
+  background: #e7ece9;
+}
+
+.progress-bar::-webkit-progress-bar {
+  border-radius: 999px;
+  background: #e7ece9;
+}
+
+.progress-bar::-webkit-progress-value {
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width 0.2s ease;
+}
+
+.progress-bar::-moz-progress-bar {
+  border-radius: 999px;
+  background: var(--accent);
 }
 
 .actions {
@@ -342,6 +407,7 @@ button:disabled {
 
   .control-grid,
   .effect-grid,
+  .spacing-grid,
   .actions {
     grid-template-columns: 1fr;
   }
