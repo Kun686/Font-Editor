@@ -1,7 +1,6 @@
 from io import BytesIO
 
 import pytest
-import font_processor
 from fontTools.fontBuilder import FontBuilder
 from fontTools.pens.ttGlyphPen import TTGlyphPen
 from fontTools.ttLib import TTFont
@@ -165,6 +164,23 @@ def test_bold_effect_expands_horizontal_and_vertical_bounds(sample_ttf_bytes):
     assert font["hhea"].descent == -205
 
 
+def test_bold_effect_uses_single_expanded_outline_instead_of_overlays(sample_ttf_bytes):
+    source = _load_font(sample_ttf_bytes)
+    original_contours = source["glyf"]["A"].numberOfContours
+
+    converted = convert_ttf(
+        sample_ttf_bytes,
+        scale_percent=100,
+        weight_mode="bold",
+        effect_units=5,
+    )
+    font = _load_font(converted)
+    glyph = font["glyf"]["A"]
+
+    assert glyph.numberOfContours == original_contours
+    assert _glyph_bounds(font) == (45, -5, 455, 505)
+
+
 def test_write_processed_ttf_streams_converted_font(sample_ttf_bytes):
     output = BytesIO()
 
@@ -180,7 +196,7 @@ def test_write_processed_ttf_streams_converted_font(sample_ttf_bytes):
     assert _glyph_bounds(font) == (45, -5, 455, 505)
 
 
-def test_bold_effect_preserves_original_outline_and_adds_rounded_overlays(sample_ttf_bytes):
+def test_bold_effect_expands_existing_outline_without_overlay_contours(sample_ttf_bytes):
     source = _load_font(sample_ttf_bytes)
     original_glyph = source["glyf"]["A"]
     original_glyph.expand(source["glyf"])
@@ -198,19 +214,13 @@ def test_bold_effect_preserves_original_outline_and_adds_rounded_overlays(sample
     contour_bounds = _glyph_contour_bounds(font, "A")
 
     assert not glyph.isComposite()
-    assert glyph.numberOfContours == original_contours * 9
-    assert list(glyph.coordinates[: len(original_coordinates)]) == original_coordinates
-    assert (45, 0, 445, 500) in contour_bounds
-    assert (55, 0, 455, 500) in contour_bounds
-    assert (50, -5, 450, 495) in contour_bounds
-    assert (50, 5, 450, 505) in contour_bounds
-    assert (46, -4, 446, 496) in contour_bounds
-    assert (54, 4, 454, 504) in contour_bounds
+    assert glyph.numberOfContours == original_contours
+    assert list(glyph.coordinates) != original_coordinates
+    assert contour_bounds == [(45, -5, 455, 505)]
     assert _glyph_bounds(font) == (45, -5, 455, 505)
 
 
-def test_large_font_bold_uses_low_memory_outline_expansion(sample_ttf_bytes, monkeypatch):
-    monkeypatch.setattr(font_processor, "BOLD_OVERLAY_MAX_GLYPHS", 0, raising=False)
+def test_bold_effect_uses_stable_outline_expansion_without_font_size_gate(sample_ttf_bytes):
     source = _load_font(sample_ttf_bytes)
     original_contours = source["glyf"]["A"].numberOfContours
 
@@ -224,7 +234,7 @@ def test_large_font_bold_uses_low_memory_outline_expansion(sample_ttf_bytes, mon
     glyph = font["glyf"]["A"]
 
     assert glyph.numberOfContours == original_contours
-    assert _glyph_bounds(font) == (46, -5, 454, 505)
+    assert _glyph_bounds(font) == (45, -5, 455, 505)
     assert font["hmtx"].metrics["A"] == (510, 45)
 
 
@@ -256,16 +266,7 @@ def test_bold_effect_offsets_holes_inward_instead_of_scaling_from_center():
     contour_bounds = _glyph_contour_bounds(font, "O")
 
     assert not glyph.isComposite()
-    assert (0, 0, 1000, 1000) in contour_bounds
-    assert (400, 200, 600, 800) in contour_bounds
-    assert (5, 0, 1005, 1000) in contour_bounds
-    assert (405, 200, 605, 800) in contour_bounds
-    assert (-5, 0, 995, 1000) in contour_bounds
-    assert (395, 200, 595, 800) in contour_bounds
-    assert (0, -5, 1000, 995) in contour_bounds
-    assert (400, 195, 600, 795) in contour_bounds
-    assert (-4, -4, 996, 996) in contour_bounds
-    assert (396, 196, 596, 796) in contour_bounds
+    assert contour_bounds == [(-5, -5, 1005, 1005), (405, 205, 595, 795)]
     assert _glyph_bounds(font, "O") == (-5, -5, 1005, 1005)
 
 

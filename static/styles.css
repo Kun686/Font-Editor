@@ -554,6 +554,17 @@ legend {
     rgba(255, 255, 255, 0.76);
 }
 
+.font-preview-card[data-empty-preview="true"] {
+  border-style: dashed;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(238, 245, 241, 0.76)),
+    rgba(255, 255, 255, 0.68);
+}
+
+.font-preview-card[data-empty-preview="true"] .preview-output {
+  color: rgba(16, 33, 28, 0.62);
+}
+
 .preview-card-header {
   display: flex;
   justify-content: space-between;

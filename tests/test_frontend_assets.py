@@ -71,6 +71,20 @@ def test_frontend_previews_uploaded_fonts_before_conversion():
     assert 'source-preview-output' in script
 
 
+def test_frontend_shows_default_preview_cards_before_upload():
+    script = (BASE_DIR / "static" / "app.js").read_text(encoding="utf-8")
+    styles = (BASE_DIR / "static" / "styles.css").read_text(encoding="utf-8")
+    markup = (BASE_DIR / "templates" / "index.html").read_text(encoding="utf-8")
+
+    assert 'id="target-preview-card" class="font-preview-card" hidden' not in markup
+    assert 'id="result-preview-card" class="font-preview-card result-preview-card" hidden' not in markup
+    assert 'data-empty-preview="true"' in markup
+    assert "function showDefaultPreview" in script
+    assert 'showDefaultPreview("target")' in script
+    assert 'showDefaultPreview("result")' in script
+    assert '.font-preview-card[data-empty-preview="true"]' in styles
+
+
 def test_frontend_can_clear_uploaded_fonts():
     script = (BASE_DIR / "static" / "app.js").read_text(encoding="utf-8")
     markup = (BASE_DIR / "templates" / "index.html").read_text(encoding="utf-8")

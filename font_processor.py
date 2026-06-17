@@ -14,7 +14,6 @@ MIN_EFFECT_UNITS = 0
 MAX_EFFECT_UNITS = 500
 MIN_SPACING_PERCENT = -50
 MAX_SPACING_PERCENT = 50
-BOLD_OVERLAY_MAX_GLYPHS = 6000
 WEIGHT_MODES = {"none", "thin", "bold"}
 REPLACEMENT_SCOPES = {
     "digits": "0123456789",
@@ -545,11 +544,9 @@ def _apply_weight_effect(font: TTFont, mode: str, effect_x: int, effect_y: int) 
         return
 
     glyf = font["glyf"]
-    bold_offsets = _bold_overlay_offsets(effect_x, effect_y)
-    use_overlay_bold = mode == "bold" and _uses_overlay_bold(font)
+    bold_offsets = _bold_metric_offsets(effect_x, effect_y)
     thin_delta_x = -effect_x
     thin_delta_y = -effect_y
-    composite_bold_glyphs = []
     for glyph_name in font.getGlyphOrder():
         glyph = glyf[glyph_name]
         glyph.expand(glyf)
@@ -557,14 +554,13 @@ def _apply_weight_effect(font: TTFont, mode: str, effect_x: int, effect_y: int) 
             continue
 
         if mode == "bold":
-            if use_overlay_bold:
-                _append_bold_overlay(glyph, glyf, bold_offsets)
-            elif glyph.isComposite():
-                composite_bold_glyphs.append(glyph)
-            else:
-                _embolden_glyph_contours(glyph, effect_x, effect_y)
-                glyph.coordinates.toInt()
-                glyph.recalcBounds(glyf)
+            if glyph.isComposite():
+                glyph = _decomposed_composite_glyph(glyph, glyf)
+                glyf[glyph_name] = glyph
+                glyph.expand(glyf)
+            _embolden_glyph_contours(glyph, effect_x, effect_y)
+            glyph.coordinates.toInt()
+            glyph.recalcBounds(glyf)
         else:
             if glyph.isComposite():
                 glyph.tryRecalcBoundsComposite(glyf)
@@ -572,9 +568,6 @@ def _apply_weight_effect(font: TTFont, mode: str, effect_x: int, effect_y: int) 
             _offset_glyph_contours(glyph, thin_delta_x, thin_delta_y)
             glyph.coordinates.toInt()
             glyph.recalcBounds(glyf)
-
-    for glyph in composite_bold_glyphs:
-        glyph.tryRecalcBoundsComposite(glyf)
 
     if mode == "bold":
         _adjust_synthetic_bold_metrics(font, bold_offsets)
@@ -588,69 +581,21 @@ def _glyph_has_drawable_outline(glyph) -> bool:
     return glyph.isComposite() or glyph.numberOfContours > 0
 
 
-def _uses_overlay_bold(font: TTFont) -> bool:
-    return len(font.getGlyphOrder()) <= BOLD_OVERLAY_MAX_GLYPHS
-
-
-def _bold_overlay_offsets(effect_x: int, effect_y: int) -> tuple[tuple[int, int], ...]:
+def _bold_metric_offsets(effect_x: int, effect_y: int) -> tuple[tuple[int, int], ...]:
     offsets: list[tuple[int, int]] = []
 
     if effect_x:
         offsets.extend(((-effect_x, 0), (effect_x, 0)))
     if effect_y:
         offsets.extend(((0, -effect_y), (0, effect_y)))
-    if effect_x and effect_y:
-        diagonal_x = max(1, _round(effect_x * 0.707))
-        diagonal_y = max(1, _round(effect_y * 0.707))
-        offsets.extend(
-            (
-                (-diagonal_x, -diagonal_y),
-                (diagonal_x, -diagonal_y),
-                (-diagonal_x, diagonal_y),
-                (diagonal_x, diagonal_y),
-            )
-        )
 
     return tuple(dict.fromkeys(offsets))
 
 
-def _append_bold_overlay(glyph, glyf, offsets: tuple[tuple[int, int], ...]) -> None:
-    if not offsets:
-        return
-
-    if glyph.isComposite():
-        original_components = list(glyph.components)
-        for offset_x, offset_y in offsets:
-            for component in original_components:
-                shifted = deepcopy(component)
-                shifted.x = _clamp_signed_16(shifted.x + offset_x)
-                shifted.y = _clamp_signed_16(shifted.y + offset_y)
-                glyph.components.append(shifted)
-        glyph.tryRecalcBoundsComposite(glyf)
-        return
-
-    original_coordinates = list(glyph.coordinates)
-    original_flags = list(glyph.flags)
-    original_end_points = list(glyph.endPtsOfContours)
-    base_index = len(glyph.coordinates)
-
-    for offset_x, offset_y in offsets:
-        glyph.coordinates.extend(
-            [
-                (
-                    _clamp_signed_16(x + offset_x),
-                    _clamp_signed_16(y + offset_y),
-                )
-                for x, y in original_coordinates
-            ]
-        )
-        glyph.flags.extend(original_flags)
-        glyph.endPtsOfContours.extend(base_index + end_point for end_point in original_end_points)
-        base_index += len(original_coordinates)
-
-    glyph.numberOfContours = len(glyph.endPtsOfContours)
-    glyph.coordinates.toInt()
-    glyph.recalcBounds(glyf)
+def _decomposed_composite_glyph(glyph, glyf):
+    pen = TTGlyphPen(None)
+    glyph.draw(pen, glyf)
+    return pen.glyph()
 
 
 def _embolden_glyph_contours(glyph, delta_x: int, delta_y: int) -> None:
@@ -667,27 +612,99 @@ def _embolden_glyph_contours(glyph, delta_x: int, delta_y: int) -> None:
         if len(points) < 2:
             continue
 
-        xs = [x for x, _ in points]
-        ys = [y for _, y in points]
-        center_x = (min(xs) + max(xs)) / 2
-        center_y = (min(ys) + max(ys)) / 2
-        invert_for_hole = depth % 2 == 1
-        for glyph_index, (x, y) in zip(contour, points):
-            direction_x, direction_y = _rounded_offset_direction(
-                x,
-                y,
-                center_x,
-                center_y,
-                invert_for_hole,
+        shrink_counter = depth % 2 == 1
+        counter_clockwise = _contour_signed_area(points) > 0
+        for point_index, glyph_index in enumerate(contour):
+            direction_x, direction_y = _normal_offset_direction(
+                points,
+                point_index,
+                counter_clockwise,
+                shrink_counter,
             )
-            x, y = original[glyph_index]
+            x, y = points[point_index]
             updates[glyph_index] = (
-                _clamp_signed_16(_round(x + direction_x * delta_x)),
-                _clamp_signed_16(_round(y + direction_y * delta_y)),
+                _clamp_signed_16(x + _limited_axis_offset(direction_x, delta_x)),
+                _clamp_signed_16(y + _limited_axis_offset(direction_y, delta_y)),
             )
 
     for index, point in updates.items():
         glyph.coordinates[index] = point
+
+
+def _contour_signed_area(points: list[tuple[int, int]]) -> float:
+    area = 0.0
+    previous_x, previous_y = points[-1]
+    for current_x, current_y in points:
+        area += previous_x * current_y - current_x * previous_y
+        previous_x, previous_y = current_x, current_y
+    return area / 2
+
+
+def _normal_offset_direction(
+    points: list[tuple[int, int]],
+    point_index: int,
+    counter_clockwise: bool,
+    invert: bool,
+) -> tuple[float, float]:
+    point = points[point_index]
+    previous_point = _nearest_distinct_point(points, point_index, -1)
+    next_point = _nearest_distinct_point(points, point_index, 1)
+    incoming_normal = _segment_outward_normal(previous_point, point, counter_clockwise)
+    outgoing_normal = _segment_outward_normal(point, next_point, counter_clockwise)
+    if invert:
+        incoming_normal = (-incoming_normal[0], -incoming_normal[1])
+        outgoing_normal = (-outgoing_normal[0], -outgoing_normal[1])
+
+    direction_x = incoming_normal[0] + outgoing_normal[0]
+    direction_y = incoming_normal[1] + outgoing_normal[1]
+    direction_length = (direction_x * direction_x + direction_y * direction_y) ** 0.5
+    if direction_length == 0:
+        return outgoing_normal
+
+    direction_x /= direction_length
+    direction_y /= direction_length
+    projection = direction_x * outgoing_normal[0] + direction_y * outgoing_normal[1]
+    if projection <= 0.25:
+        scale = 1.0
+    else:
+        scale = min(2.0, 1.0 / projection)
+    return direction_x * scale, direction_y * scale
+
+
+def _nearest_distinct_point(
+    points: list[tuple[int, int]],
+    point_index: int,
+    step: int,
+) -> tuple[int, int]:
+    point_count = len(points)
+    point = points[point_index]
+    for distance in range(1, point_count + 1):
+        candidate = points[(point_index + step * distance) % point_count]
+        if candidate != point:
+            return candidate
+    return point
+
+
+def _segment_outward_normal(
+    start: tuple[int, int],
+    end: tuple[int, int],
+    counter_clockwise: bool,
+) -> tuple[float, float]:
+    delta_x = end[0] - start[0]
+    delta_y = end[1] - start[1]
+    length = (delta_x * delta_x + delta_y * delta_y) ** 0.5
+    if length == 0:
+        return 0, 0
+    if counter_clockwise:
+        return delta_y / length, -delta_x / length
+    return -delta_y / length, delta_x / length
+
+
+def _limited_axis_offset(direction: float, delta: int) -> int:
+    if delta == 0:
+        return 0
+    value = _round(direction * delta)
+    return max(-delta, min(delta, value))
 
 
 def _refresh_glyph_counts(font: TTFont) -> None:

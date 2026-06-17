@@ -565,6 +565,7 @@ async function setPreviewFont(slotName, fontUrl, loadedMessage) {
   slot.style.textContent = "";
   slot.card.hidden = false;
   slot.card.dataset.loading = "true";
+  delete slot.card.dataset.emptyPreview;
   delete slot.card.dataset.loaded;
   setPreviewStatus(slotName, "正在加载字体...");
   updatePreviewText();
@@ -601,6 +602,7 @@ async function setPreviewFont(slotName, fontUrl, loadedMessage) {
 function markPreviewLoaded(slotName, message) {
   const slot = previewSlots[slotName];
   delete slot.card.dataset.loading;
+  delete slot.card.dataset.emptyPreview;
   slot.card.dataset.loaded = "true";
   setPreviewStatus(slotName, message);
 }
@@ -609,6 +611,7 @@ function showResultPreviewLoading(message) {
   const slot = previewSlots.result;
   slot.card.hidden = false;
   slot.card.dataset.loading = "true";
+  delete slot.card.dataset.emptyPreview;
   delete slot.card.dataset.loaded;
   setPreviewStatus("result", message);
   updatePreviewText();
@@ -632,7 +635,7 @@ function clearDownload() {
     URL.revokeObjectURL(activeDownloadUrl);
     activeDownloadUrl = null;
   }
-  clearPreviewSlot("result");
+  showDefaultPreview("result");
   updatePreviewText();
   downloadLink.hidden = true;
   downloadLink.removeAttribute("href");
@@ -646,7 +649,27 @@ function clearFilePreview(slotName) {
     URL.revokeObjectURL(previewFileUrls[slotName]);
     previewFileUrls[slotName] = null;
   }
+  if (slotName === "target" || slotName === "result") {
+    showDefaultPreview(slotName);
+    return;
+  }
   clearPreviewSlot(slotName);
+}
+
+function showDefaultPreview(slotName) {
+  const slot = previewSlots[slotName];
+  slot.loadToken += 1;
+  clearPreviewFontFace(slot);
+  slot.style.textContent = "";
+  slot.output.style.removeProperty("font-family");
+  slot.card.hidden = false;
+  slot.card.dataset.emptyPreview = "true";
+  delete slot.card.dataset.loading;
+  delete slot.card.dataset.loaded;
+  if (slotName === "result") {
+    setPreviewStatus("result", "绛夊緟杞崲");
+  }
+  updatePreviewText();
 }
 
 function clearPreviewSlot(slotName) {
@@ -656,6 +679,7 @@ function clearPreviewSlot(slotName) {
   slot.style.textContent = "";
   slot.output.style.removeProperty("font-family");
   slot.card.hidden = true;
+  delete slot.card.dataset.emptyPreview;
   delete slot.card.dataset.loading;
   delete slot.card.dataset.loaded;
   if (slotName === "result") {
@@ -858,7 +882,8 @@ function cleanupStudioEnhancements() {
   }
 }
 
-updatePreviewText();
+showDefaultPreview("target");
+showDefaultPreview("result");
 initDropzones();
 stopTextFlipBadges = initTextFlipBadges();
 stopStudioBackground = initStudioBackground();
